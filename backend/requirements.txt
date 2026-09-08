@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+httpx
+hypothesis
+pytest
+pytest-asyncio

@@ -1,0 +1,234 @@
+{
+  "pbtResults": {},
+  "executionHistory": {
+    "1.1 Scaffold the FastAPI backend project": [
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788777448175
+      },
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788777769601
+      }
+    ],
+    "1.2 Create backend config module with host allowlist, base URLs, and timeout": [
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788777449398
+      },
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788777770985
+      }
+    ],
+    "1.3 Scaffold the Vite + React + TypeScript frontend project": [
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788777450372
+      },
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788777772077
+      }
+    ],
+    "1. Scaffold backend and frontend projects with configuration": [
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788777772154
+      }
+    ],
+    "2.1 Define backend Pydantic request/response models": [
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788777779772
+      },
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788777956840
+      }
+    ],
+    "2.2 Create API router skeleton and register endpoints": [
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788777780667
+      },
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788777955614
+      }
+    ],
+    "2. Build backend Pydantic models and API skeleton": [
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788777956947
+      }
+    ],
+    "3.1 Implement `decode_polyline6` in the backend": [
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788777957506
+      },
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788778051244
+      }
+    ],
+    "3. Implement polyline6 decoder": [
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788778051300
+      }
+    ],
+    "4.1 Implement httpx call wrapper with host allowlist and timing": [
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788778052701
+      },
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788778312465
+      }
+    ],
+    "4.2 Implement error classification into EngineError kinds": [
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788778053854
+      },
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788778313409
+      }
+    ],
+    "4.3 Implement `GET /api/health` reachability probe": [
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788778054816
+      },
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788778314275
+      }
+    ],
+    "4. Implement engine host allowlist enforcement and health probe": [
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788778314328
+      }
+    ],
+    "5.1 Implement Default_OSRM_Request builder": [
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788778322247
+      },
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788778533471
+      }
+    ],
+    "5.3 Implement `normalize_osrm_response`": [
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788778323065
+      },
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788778534662
+      }
+    ],
+    "5. Implement OSRM request builder and normalizer": [
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788778534697
+      }
+    ],
+    "6.2 Implement `normalize_valhalla_response` with unit-aware conversion and multi-leg dedup": [
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788778536089
+      },
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788778757384
+      }
+    ],
+    "6.1 Implement Default_Valhalla_Request builder": [
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788778536923
+      },
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788778755926
+      }
+    ],
+    "6. Implement Valhalla request builder and normalizer": [
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788778757443
+      }
+    ],
+    "7.1 Implement the compare handler with concurrent fan-out and error isolation": [
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788778758297
+      },
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788778959201
+      }
+    ],
+    "7. Implement POST /api/compare fan-out": [
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788778959260
+      }
+    ],
+    "8. Checkpoint - Real-engine backend integration against running local services": [
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788778971306
+      },
+      {
+        "executionId": "5d5494e8-2e8c-4bb9-a116-965d239d16b8",
+        "chatSessionId": "sess_070271e6-72aa-4896-bf10-8464b9f341b2",
+        "timestamp": 1788779306966
+      }
+    ]
+  }
+}

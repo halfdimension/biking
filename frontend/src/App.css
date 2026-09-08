@@ -1,0 +1,1400 @@
+/**
+ * Desktop-first dashboard layout (Req 15).
+ *
+ * Full-viewport shell: a top toolbar spanning the full width, a middle row that
+ * splits into a fixed-width left sidebar, a flex-grow center map (largest space,
+ * Req 15.3), and a fixed-width right sidebar, followed by a bottom tab strip.
+ * Desktop layout is prioritized over mobile (Req 15.6).
+ */
+
+:root {
+  --sidebar-left-width: 300px;
+  --sidebar-right-width: 320px;
+  --border-color: #d0d5dd;
+  --panel-bg: #f7f8fa;
+  --toolbar-bg: #1f2937;
+  --toolbar-fg: #f9fafb;
+  --accent: #2563eb;
+  --accent-disabled: #93b4f5;
+  --danger: #dc2626;
+  --dot-reachable: #16a34a;
+  --dot-unreachable: #dc2626;
+  --dot-unknown: #9ca3af;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+}
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+/* --- Toolbar (Req 15.1) --- */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 0 16px;
+  height: 56px;
+  background: var(--toolbar-bg);
+  color: var(--toolbar-fg);
+  flex: 0 0 auto;
+}
+
+.toolbar__title {
+  font-size: 16px;
+  font-weight: 600;
+  white-space: nowrap;
+  margin: 0;
+}
+
+.toolbar__spacer {
+  flex: 1 1 auto;
+}
+
+.toolbar__compare-btn {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.toolbar__compare-btn:disabled {
+  background: var(--accent-disabled);
+  cursor: not-allowed;
+}
+
+.health-indicators {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.health-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.health-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  background: var(--dot-unknown);
+}
+
+.health-dot--reachable {
+  background: var(--dot-reachable);
+}
+
+.health-dot--unreachable {
+  background: var(--dot-unreachable);
+}
+
+.health-dot--unknown {
+  background: var(--dot-unknown);
+}
+
+/* --- Middle row --- */
+.middle-row {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.left-sidebar {
+  flex: 0 0 var(--sidebar-left-width);
+  width: var(--sidebar-left-width);
+  border-right: 1px solid var(--border-color);
+  background: var(--panel-bg);
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.right-sidebar {
+  flex: 0 0 var(--sidebar-right-width);
+  width: var(--sidebar-right-width);
+  border-left: 1px solid var(--border-color);
+  background: var(--panel-bg);
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.map-view {
+  flex: 1 1 auto;
+  min-width: 0;
+  position: relative;
+  background: #e5e7eb;
+  color: #6b7280;
+}
+
+.map-view__canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* --- Map right-click context menu (Req 1.4) --- */
+.map-context-menu {
+  position: absolute;
+  z-index: 10;
+  min-width: 170px;
+  background: #fff;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+}
+
+.map-context-menu__item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: #fff;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #374151;
+}
+
+.map-context-menu__item:hover {
+  background: var(--panel-bg);
+}
+
+/* --- Map selection controls (Req 1.2, 1.3) --- */
+.map-selection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.map-selection__btn {
+  border: 1px solid var(--border-color);
+  background: #fff;
+  border-radius: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #374151;
+  text-align: left;
+}
+
+.map-selection__btn--armed {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.map-selection__hint {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+/* --- Sidebar sections --- */
+.section {
+  margin-bottom: 16px;
+}
+
+.section__title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #4b5563;
+  margin: 0 0 6px;
+}
+
+.section__body {
+  background: #fff;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 10px;
+  color: #6b7280;
+  min-height: 32px;
+}
+
+/* --- Mode toggle --- */
+.mode-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.mode-toggle__btn {
+  border: none;
+  background: #fff;
+  padding: 6px 14px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #374151;
+}
+
+.mode-toggle__btn--active {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* --- Compare error banner --- */
+.compare-error {
+  background: #fef2f2;
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  margin-top: 8px;
+}
+
+/* --- Bottom tabs (Req 15.5) --- */
+.bottom-tabs {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--border-color);
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  max-height: 30vh;
+}
+
+.bottom-tabs__strip {
+  display: flex;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--panel-bg);
+}
+
+.bottom-tabs__tab {
+  border: none;
+  background: transparent;
+  padding: 10px 16px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #4b5563;
+  border-bottom: 2px solid transparent;
+}
+
+.bottom-tabs__tab--active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+.bottom-tabs__panel {
+  padding: 12px 16px;
+  overflow-y: auto;
+  color: #6b7280;
+}
+
+/* --- Route visibility list (Req 5.1, 5.2) --- */
+.route-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.route-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  line-height: 1.2;
+}
+
+.route-row__checkbox {
+  flex: 0 0 auto;
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+.route-row__swatch {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+}
+
+.route-row__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  color: #374151;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.route-list__empty {
+  margin: 0;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+/* --- Bulk visibility controls (Req 5.3–5.8) --- */
+.bulk-visibility__group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.bulk-visibility__btn {
+  border: 1px solid var(--border-color);
+  background: #fff;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: #374151;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.bulk-visibility__btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.bulk-visibility__btn:disabled {
+  color: #9ca3af;
+  background: var(--panel-bg);
+  cursor: not-allowed;
+}
+
+.bulk-visibility__hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+/* --- Route selection (Req 6.2, 6.6) --- */
+/* The clickable row area that selects a route. Reset button chrome so it reads
+   as a plain, full-width row while staying keyboard-focusable. */
+.route-row__select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 2px 4px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.route-row__select:hover {
+  background: #eef2ff;
+}
+
+.route-row__select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Selected row highlight so map↔list selection stays visible (Req 6.2). */
+.route-row--selected .route-row__select {
+  background: #e0e7ff;
+  border-color: var(--accent);
+}
+
+.route-row--selected .route-row__label {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* --- Selected route details panel (Req 6.6) --- */
+.selected-route__empty {
+  margin: 0;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.selected-route__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.selected-route__swatch {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+}
+
+.selected-route__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.selected-route__fields {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  margin: 0 0 10px;
+  font-size: 12px;
+}
+
+.selected-route__fields dt {
+  color: #6b7280;
+}
+
+.selected-route__fields dd {
+  margin: 0;
+  color: #374151;
+  text-align: right;
+}
+
+.selected-route__id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.selected-route__clear {
+  border: 1px solid var(--border-color);
+  background: #fff;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: #374151;
+  cursor: pointer;
+}
+
+.selected-route__clear:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* --- Comparison table (Req 8.1–8.4) --- */
+.comparison-table__empty {
+  margin: 0;
+  color: #6b7280;
+  font-style: italic;
+}
+
+.comparison-table__wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.comparison-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.comparison-table th,
+.comparison-table td {
+  padding: 5px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--border-color);
+  white-space: nowrap;
+}
+
+.comparison-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--panel-bg);
+  font-weight: 600;
+  color: #374151;
+  z-index: 1;
+}
+
+/* Right-align and monospace the numeric columns for easy scanning. */
+.comparison-table__num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.comparison-table__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.comparison-table__swatch {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+}
+
+.comparison-table__row {
+  cursor: pointer;
+}
+
+.comparison-table__row:hover {
+  background: var(--panel-bg);
+}
+
+.comparison-table__row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Selected row highlight so map↔table selection stays visible (Req 8.4). */
+.comparison-table__row--selected {
+  background: #e0e7ff;
+}
+
+.comparison-table__row--selected td {
+  border-bottom-color: var(--accent);
+}
+
+/* --- Raw request editors (Task 23.1, Req 9.4–9.7, 17.5, 17.6) --- */
+.raw-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 900px;
+}
+
+.raw-editor__label {
+  font-weight: 600;
+  font-size: 12px;
+  color: #374151;
+}
+
+.raw-editor__input,
+.raw-editor__textarea {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  background: #fff;
+  resize: vertical;
+}
+
+.raw-editor__textarea {
+  min-height: 72px;
+}
+
+.raw-editor__input:focus,
+.raw-editor__textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.raw-editor__actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.raw-editor__send {
+  padding: 6px 14px;
+  border: none;
+  border-radius: 4px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.raw-editor__send:disabled {
+  background: var(--accent-disabled);
+  cursor: not-allowed;
+}
+
+.raw-editor__reset {
+  padding: 6px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--panel-bg);
+  color: #374151;
+  cursor: pointer;
+}
+
+.raw-editor__reset:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.raw-editor__status {
+  margin: 0;
+  font-size: 12px;
+  color: #4b5563;
+}
+
+.raw-editor__status--ok {
+  color: var(--dot-reachable);
+  font-weight: 600;
+}
+
+.raw-editor__error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.raw-editor__json-indicator {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.raw-editor__json-indicator--ok {
+  color: var(--dot-reachable);
+}
+
+.raw-editor__json-indicator--bad {
+  color: var(--danger);
+}
+
+/* --- Raw Response Inspector (Req 11.2–11.4) --- */
+.raw-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.raw-inspector__empty,
+.raw-inspector__loading {
+  margin: 0;
+  color: #6b7280;
+}
+
+.raw-inspector__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.raw-inspector__engine {
+  font-weight: 700;
+  color: #111827;
+}
+
+.raw-inspector__source,
+.raw-inspector__http {
+  font-size: 11px;
+  color: #4b5563;
+  background: var(--panel-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+.raw-inspector__warncount {
+  font-size: 11px;
+  color: #92400e;
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+.raw-inspector__copy {
+  margin-left: auto;
+  padding: 4px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.raw-inspector__copy:disabled {
+  background: var(--accent-disabled);
+  cursor: not-allowed;
+}
+
+.raw-inspector__copied {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dot-reachable);
+}
+
+.raw-inspector__error {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  padding: 8px 10px;
+  border: 1px solid #fca5a5;
+  background: #fef2f2;
+  border-radius: 4px;
+}
+
+.raw-inspector__error-kind {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 700;
+  color: var(--danger);
+}
+
+.raw-inspector__error-message {
+  color: #7f1d1d;
+}
+
+.raw-inspector__warnings {
+  margin: 0;
+  padding-left: 18px;
+  color: #92400e;
+}
+
+.raw-inspector__warn-kind {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 700;
+}
+
+/* --- JSON tree viewer --- */
+.json-viewer {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #1f2937;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.json-viewer__row {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+}
+
+.json-viewer__caret {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: #6b7280;
+  padding: 0 4px 0 0;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.json-viewer__key {
+  color: #7c3aed;
+}
+
+.json-viewer__key--index {
+  color: #9ca3af;
+}
+
+.json-viewer__colon {
+  color: #6b7280;
+}
+
+.json-viewer__brace {
+  color: #6b7280;
+}
+
+.json-viewer__summary {
+  border: 1px solid var(--border-color);
+  background: var(--panel-bg);
+  border-radius: 4px;
+  color: #4b5563;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+  padding: 0 6px;
+  margin: 0 4px;
+}
+
+.json-viewer__string {
+  color: #16a34a;
+}
+
+.json-viewer__number {
+  color: #2563eb;
+}
+
+.json-viewer__boolean {
+  color: #b45309;
+}
+
+.json-viewer__null {
+  color: #9ca3af;
+  font-style: italic;
+}
+
+.json-viewer__unknown {
+  color: #6b7280;
+}
+
+/* --- Curl Import panel (Task 25.1, Req 10.1, 10.2, 17.7) --- */
+.curl-import {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.curl-import__hint {
+  margin: 0;
+  font-size: 11px;
+  color: #6b7280;
+  line-height: 1.4;
+}
+
+.curl-import__area {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.curl-import__label {
+  font-weight: 600;
+  font-size: 12px;
+  color: #374151;
+}
+
+.curl-import__textarea {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  background: #fff;
+  resize: vertical;
+  min-height: 64px;
+}
+
+.curl-import__textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.curl-import__actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.curl-import__import {
+  padding: 6px 12px;
+  border: none;
+  border-radius: 4px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.curl-import__import:disabled {
+  background: var(--accent-disabled);
+  cursor: not-allowed;
+}
+
+.curl-import__status {
+  margin: 0;
+  font-size: 12px;
+  color: #4b5563;
+}
+
+.curl-import__status--ok {
+  color: var(--dot-reachable);
+  font-weight: 600;
+}
+
+.curl-import__error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--danger);
+  font-weight: 600;
+}
+
+/* --- Saved Test Cases panel (Task 26.1, Req 13) --- */
+.testcases {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.testcases__save {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.testcases__save-name,
+.testcases__rename-input,
+.testcases__notes {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-size: 12px;
+  box-sizing: border-box;
+}
+
+.testcases__save-name:focus,
+.testcases__rename-input:focus,
+.testcases__notes:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.testcases__save-btn {
+  padding: 6px 12px;
+  border: none;
+  border-radius: 4px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.testcases__save-btn:disabled {
+  background: var(--accent-disabled);
+  cursor: not-allowed;
+}
+
+.testcases__hint,
+.testcases__empty {
+  margin: 0;
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.testcases__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.testcases__row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--panel-bg);
+}
+
+.testcases__row--current {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.testcases__row-head {
+  display: flex;
+  align-items: center;
+}
+
+.testcases__name {
+  font-size: 12px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.testcases__current-badge {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.testcases__coords {
+  font-size: 11px;
+  color: #4b5563;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.testcases__actions {
+  display: flex;
+  gap: 6px;
+}
+
+.testcases__btn {
+  padding: 4px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: #fff;
+  color: #111827;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.testcases__btn:hover {
+  border-color: var(--accent);
+}
+
+.testcases__btn--danger {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+/* --- Assessment tab (Task 27.1, Req 14, 17.11) --------------------------- */
+
+.assessment {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.assessment__empty {
+  margin: 0;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+/* Session-mode notice: assessments are not persisted until the test case is
+   saved (Req 14 — indicate saving is required). */
+.assessment__banner {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid #f59e0b;
+  background: #fffbeb;
+  color: #92400e;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.assessment__cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.assessment-card {
+  border: 1px solid var(--border-color);
+  background: #fff;
+  border-radius: 6px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.assessment-card__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.assessment-card__swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  flex: 0 0 auto;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
+}
+
+.assessment-card__title {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.assessment-card__kind {
+  margin-left: auto;
+  font-size: 11px;
+  color: #4b5563;
+  background: var(--panel-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+.assessment-card__fields {
+  display: grid;
+  grid-template-columns: auto 1fr auto 1fr;
+  gap: 2px 10px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.assessment-card__fields dt {
+  color: #6b7280;
+}
+
+.assessment-card__fields dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Rating segmented control. The active option is filled; Unrated is the
+   default when no entry exists. Warnings are rendered separately below. */
+.assessment-card__ratings {
+  display: inline-flex;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  overflow: hidden;
+  align-self: flex-start;
+}
+
+.assessment-rating {
+  border: none;
+  border-right: 1px solid var(--border-color);
+  background: #fff;
+  padding: 5px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  color: #374151;
+}
+
+.assessment-rating:last-child {
+  border-right: none;
+}
+
+.assessment-rating:hover:not(.assessment-rating--active) {
+  background: var(--panel-bg);
+}
+
+.assessment-rating--active {
+  color: #fff;
+  font-weight: 600;
+}
+
+.assessment-rating--good.assessment-rating--active {
+  background: #16a34a;
+}
+
+.assessment-rating--bad.assessment-rating--active {
+  background: var(--danger);
+}
+
+.assessment-rating--neutral.assessment-rating--active {
+  background: #6b7280;
+}
+
+.assessment-rating--unrated.assessment-rating--active {
+  background: #374151;
+}
+
+.assessment-card__notes-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.assessment-card__notes {
+  width: 100%;
+  min-height: 48px;
+  resize: vertical;
+  padding: 6px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: inherit;
+  color: #111827;
+}
+
+.assessment-card__notes:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* Warning block — visually distinct from the rating control (Req 17.11:
+   warnings are NOT ratings). */
+.assessment-card__warnings,
+.assessment__dropped-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.assessment-warning {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid #f59e0b;
+  border-left-width: 3px;
+  background: #fffbeb;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #92400e;
+}
+
+.assessment-warning__badge {
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.assessment-warning__route,
+.assessment-warning__kind {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 600;
+}
+
+.assessment-warning__message {
+  color: #78350f;
+}
+
+.assessment__dropped {
+  border: 1px solid #f59e0b;
+  background: #fffdf5;
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.assessment__dropped-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: #92400e;
+}
+
+/* --- Per-engine status panels (Task 28.1, Req 17.1–17.3, 17.8, 17.9, 17.13) --- */
+.engine-status-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.engine-status {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.engine-status--idle {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 6px;
+  color: #6b7280;
+}
+
+.engine-status__name {
+  font-weight: 600;
+}
+
+.engine-status__idle {
+  color: #9ca3af;
+}
+
+/* Error state (Req 17.1, 17.2, 17.3, 17.12) — mirrors the compare-error banner. */
+.engine-status__error {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: #fef2f2;
+  border: 1px solid var(--danger);
+  border-left-width: 3px;
+  color: var(--danger);
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+
+.engine-status__error-label {
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.engine-status__error-message {
+  color: #7f1d1d;
+}
+
+/* OK state — a low-key success line, not styled as an error. */
+.engine-status__ok {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.engine-status__ok-badge {
+  font-weight: 700;
+  color: var(--dot-reachable);
+}
+
+.engine-status__ok-detail {
+  color: #6b7280;
+}
+
+/* Zero-alternates note (Req 17.9) — informational, distinct from the error. */
+.engine-status__note {
+  color: #6b7280;
+  font-style: italic;
+}
+
+/* Per-route warnings for this engine (Req 17.8, 17.11) — reuse the warm warning
+   palette, kept visually distinct from the red error state. */
+.engine-status__warnings {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.engine-warning {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid #f59e0b;
+  border-left-width: 3px;
+  background: #fffbeb;
+  border-radius: 4px;
+  color: #92400e;
+}
+
+.engine-warning__badge {
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.engine-warning__route,
+.engine-warning__kind {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 600;
+}
+
+.engine-warning__message {
+  color: #78350f;
+}

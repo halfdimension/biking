@@ -1,0 +1,93 @@
+./osrm-extract -p ../profiles/adv/biking/Biking.lua ../../../../Data/delhi_ncr_data/delhi_ncr_extracted_sorted.osm.pbf
+
+./osrm-partition ../../../../Data/delhi_ncr_data/delhi_ncr_extracted_sorted.osrm
+
+./osrm-customize ../../../../Data/delhi_ncr_data/delhi_ncr_extracted_sorted.osrm
+
+./osrm-routed -p 5000 -a mld ../../../../Data/delhi_ncr_data/delhi_ncr_extracted_sorted.osrm
+
+
+=======================================
+
+./osrm-extract -p ../profiles/eta/biking/Biking.lua ../../../../../biking_data/archive/osrm_data/delhi_ncr_biking.osm.pbf
+
+
+
+
+
+./osrm-customize ../../../../../biking_data/archive/osrm_data/delhi_ncr_biking.osrm \
+  --segment-speed-file ../../../../../biking_data/archive/osrm_csv/bike_history.csv \
+  --segment-speed-file ../../../../../biking_data/archive/osrm_csv/bike_predictive.csv \
+  --segment-speed-file ../../../../../biking_data/archive/osrm_csv/un_mmi_api_edge_rw_BIKE.csv \
+  --segment-speed-file ../../../../../biking_data/archive/osrm_csv/un_mmi_api_edge_BIKE.csv \
+  --segment-speed-file ../../../../../biking_data/archive/osrm_csv/un_mmi_api_edge_with_zero_BIKE.csv \
+  --turn-penalty-file ../../../../../biking_data/archive/osrm_csv/mmi_route_bike_delay.csv
+  
+  
+  
+-rw-rw-r-- 1 cn004231 cn004231 228M Sep  8 12:00 bike_history.csv
+-rw-rw-r-- 1 cn004231 cn004231 498M Sep  8 12:01 bike_predictive.csv
+-rw-rw-r-- 1 cn004231 cn004231 2.3M Sep  8 12:01 mmi_route_bike_delay.csv
+-rw-rw-r-- 1 cn004231 cn004231  91M Sep  8 12:01 un_mmi_api_edge_BIKE.csv
+-rw-rw-r-- 1 cn004231 cn004231  12K Sep  8 12:02 un_mmi_api_edge_rw_BIKE.csv
+-rw-rw-r-- 1 cn004231 cn004231  12M Sep  8 12:02 un_mmi_api_edge_with_zero_BIKE.csv
+
+
+=======================================
+
+cn004231@COM567  ~/harsh/biking_data/archive/osrm_data
+
+delhi_ncr_biking.osm.pbf
+
+
+------
+
+test1:->
+
+src    28.68468011795408, 77.09878922896144
+
+dest   28.508336926674016, 77.28109361530393
+
+
+------
+
+test-2:->
+
+src    28.78447495380769, 76.87892122549387
+
+dest   28.207132203283837, 77.45894473456683
+
+
+------
+
+test-3:->
+
+src   28.686296926485255, 76.97992914120134
+
+dest  28.542835471894517, 77.34247797851103
+
+
+------
+
+http://localhost:5000/route/v1/biking/76.97992914120134,28.686296926485255;77.34247797851103,28.542835471894517?overview=full&geometries=polyline6&alternatives=true
+
+
+
+
+
+
+cd /home/cn004231/harsh/delhi_ncr_data/valhalla
+
+/home/cn004231/harsh/VALHALLA/engine/default/routing-nextgen-routing_nextgen_ETA/scripts/valhalla_build_config \
+  --mjolnir-tile-dir ${PWD}/valhalla_tiles \
+  --mjolnir-tile-extract ${PWD}/valhalla_tiles.tar \
+  --mjolnir-timezone ${PWD}/valhalla_tiles/timezones.sqlite \
+  --mjolnir-admin ${PWD}/valhalla_tiles/admins.sqlite \
+  > valhalla.json
+  
+  
+/home/cn004231/harsh/VALHALLA/engine/default/routing-nextgen-routing_nextgen_ETA/build/valhalla_build_tiles \
+  -c valhalla.json \
+  delhi_ncr_all_india_sorted.osm.pbf  
+  
+/home/cn004231/harsh/VALHALLA/engine/default/routing-nextgen-routing_nextgen_ETA/build/valhalla_service valhalla.json 1  
