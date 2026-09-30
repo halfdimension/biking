@@ -11,9 +11,7 @@
 
 ./osrm-extract -p ../profiles/eta/biking/Biking.lua ../../../../../biking_data/archive/osrm_data/delhi_ncr_biking.osm.pbf
 
-
-
-
+./osrm-partition ../../../../../biking_data/archive/osrm_data/delhi_ncr_biking.osrm
 
 ./osrm-customize ../../../../../biking_data/archive/osrm_data/delhi_ncr_biking.osrm \
   --segment-speed-file ../../../../../biking_data/archive/osrm_csv/bike_history.csv \
@@ -23,7 +21,7 @@
   --segment-speed-file ../../../../../biking_data/archive/osrm_csv/un_mmi_api_edge_with_zero_BIKE.csv \
   --turn-penalty-file ../../../../../biking_data/archive/osrm_csv/mmi_route_bike_delay.csv
   
-  
+./osrm-routed -p 5000 -a mld   ../../../../../biking_data/archive/osrm_data/delhi_ncr_biking.osrm
   
 -rw-rw-r-- 1 cn004231 cn004231 228M Sep  8 12:00 bike_history.csv
 -rw-rw-r-- 1 cn004231 cn004231 498M Sep  8 12:01 bike_predictive.csv
@@ -90,4 +88,106 @@ cd /home/cn004231/harsh/delhi_ncr_data/valhalla
   -c valhalla.json \
   delhi_ncr_all_india_sorted.osm.pbf  
   
+  
+/home/cn004231/harsh/VALHALLA/engine/default/routing-nextgen-routing_nextgen_ETA/build/valhalla_service valhalla.json 1    
+
+
+
+
+
+cd /home/cn004231/harsh/delhi_ncr_data/valhalla
+
+/home/cn004231/harsh/VALHALLA/engine/default/routing-nextgen-routing_nextgen_ETA/build/valhalla_add_live_traffic \
+  -c /home/cn004231/harsh/delhi_ncr_data/valhalla/valhalla.json \
+  2>&1 | tee logfile_valhalla_add_live_traffic.txt
+
+
+
+
 /home/cn004231/harsh/VALHALLA/engine/default/routing-nextgen-routing_nextgen_ETA/build/valhalla_service valhalla.json 1  
+
+
+
+
+
+
+======================
+
+
+
+
+
+
+/home/cn004231/harsh/poi_official_data
+
+delhi_small_lmg.osm
+
+
+./osrm-extract -p ../profiles/adv/fastest/Driving_Fastest.lua ../../../../../poi_official_data/delhi_small_lmg.osm
+
+./osrm-partition ../../../../../poi_official_data/delhi_small_lmg.osrm
+
+./osrm-customize ../../../../../poi_official_data/delhi_small_lmg.osrm
+
+ ./osrm-routed -p 5000 -a mld ../../../../../poi_official_data/delhi_small_lmg.osrm
+ 
+ 
+ 
+ 
+ ./osrm-routed     -a mld     -p 5000     /home/cn004231/harsh/poi_official_data/Rohtak/c3_test/rohtak_lmg_c3.osrm
+ 
+ 
+ 
+ 
+ 
+ 
+ ./osrm-extract -p ../profiles/adv/fastest/Driving_Fastest.lua /home/cn004231/harsh/poi_official_data/Rohtak/c3_test/rohtak_lmg_c3.osm
+ 
+ ./osrm-partition /home/cn004231/harsh/poi_official_data/Rohtak/c3_test/rohtak_lmg_c3.osrm
+ 
+ ./osrm-customize /home/cn004231/harsh/poi_official_data/Rohtak/c3_test/rohtak_lmg_c3.osrm
+ 
+ ./osrm-routed     -a mld     -p 5000     /home/cn004231/harsh/poi_official_data/Rohtak/c3_test/rohtak_lmg_c3.osrm
+ 
+ 
+======================
+	MIX-DATA
+	
+/home/cn004231/harsh/poi_official_data/mix_data/mix_data.osm
+
+
+./osrm-extract -p ../profiles/adv/fastest/Driving_Fastest.lua /home/cn004231/harsh/poi_official_data/mix_data/mix_data.osm
+ 
+ ./osrm-partition /home/cn004231/harsh/poi_official_data/mix_data/mix_data.osrm
+ 
+ ./osrm-customize /home/cn004231/harsh/poi_official_data/mix_data/mix_data.osrm
+ 
+ ./osrm-routed -a mld -p 5000 /home/cn004231/harsh/poi_official_data/mix_data/mix_data.osrm
+
+
+
+=============================
+
+src: 28.965854460548684, 76.49644357929687
+dest: 28.55859990426013, 77.25537700215098
+
+http://localhost:5000/route/v1/driving/76.49644357929687,28.965854460548684;77.25537700215098,28.55859990426013?steps=true&overview=false&instructions=true
+
+
+/home/cn004231/harsh/poi_official_data/new/rohtak_lmg.osm
+
+
+./osrm-extract -p ../profiles/adv/fastest/Driving_Fastest.lua /home/cn004231/harsh/poi_official_data/new/rohtak_lmg.osm
+ 
+ ./osrm-partition /home/cn004231/harsh/poi_official_data/new/rohtak_lmg.osrm
+ 
+ ./osrm-customize /home/cn004231/harsh/poi_official_data/new/rohtak_lmg.osrm
+ 
+ ./osrm-routed -a mld -p 5000 /home/cn004231/harsh/poi_official_data/new/rohtak_lmg.osrm
+
+
+
+==============================
+	MIX-DATA
+	
+./osrm-routed -a mld -p 5000 /home/cn004231/harsh/poi_official_data/mix_data/mix_data.osrm	

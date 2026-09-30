@@ -189,3 +189,113 @@ export function deleteAssessmentsFor(
   delete next[testCaseId];
   return next;
 }
+
+/* --------------------------------------------------------------------------
+ * Layout UI state persistence (collapsible panels + Focus Map).
+ *
+ * A separate, self-contained namespace kept intentionally isolated from the
+ * testcase/assessment schemas above: it never reuses TESTCASES_KEY or
+ * ASSESSMENTS_KEY. Only three booleans (plus the optional Focus-Map snapshot)
+ * are persisted — no routing/results/assessment data ever lands here.
+ *
+ * Reads are defensive: corrupt/missing/mis-shaped storage never throws and
+ * degrades to the all-expanded defaults. Writes swallow quota/serialization
+ * errors so a failed persist never crashes the app.
+ * ------------------------------------------------------------------------ */
+
+/** localStorage key for the collapsible-layout UI state. Independent of the
+ * testcase/assessment keys — never reuse those for layout. */
+export const LAYOUT_KEY = "biking.layout.v1";
+
+/**
+ * Persisted layout shape: the three collapse booleans, plus the Focus-Map
+ * bookkeeping (`mapFocused` and the pre-focus `snapshot`) so a page refresh
+ * mid-focus can still toggle Focus Map back to the exact prior states.
+ */
+export interface LayoutState {
+  leftCollapsed: boolean;
+  rightCollapsed: boolean;
+  bottomCollapsed: boolean;
+  mapFocused: boolean;
+  /** Pre-focus snapshot captured on the first Focus Map click; null otherwise. */
+  snapshot: {
+    leftCollapsed: boolean;
+    rightCollapsed: boolean;
+    bottomCollapsed: boolean;
+  } | null;
+}
+
+/** All-expanded defaults — the safe fallback for missing/corrupt storage. */
+export const DEFAULT_LAYOUT: LayoutState = {
+  leftCollapsed: false,
+  rightCollapsed: false,
+  bottomCollapsed: false,
+  mapFocused: false,
+  snapshot: null,
+};
+
+/** True when `v` is a boolean. */
+function isBoolean(v: unknown): v is boolean {
+  return typeof v === "boolean";
+}
+
+/**
+ * Read and validate the persisted layout state (defaults to all-expanded).
+ *
+ * Never throws: on missing storage, a JSON parse error, a non-object payload,
+ * or any malformed field, returns a fresh {@link DEFAULT_LAYOUT}. Each field is
+ * validated independently and falls back to its default, so a partially-corrupt
+ * payload still yields a usable, fully-expanded-by-default layout.
+ */
+export function loadLayout(): LayoutState {
+  const storage = getStorage();
+  if (!storage) return { ...DEFAULT_LAYOUT };
+  try {
+    const raw = storage.getItem(LAYOUT_KEY);
+    if (raw == null) return { ...DEFAULT_LAYOUT };
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return { ...DEFAULT_LAYOUT };
+    }
+    const p = parsed as Record<string, unknown>;
+    const snap = p.snapshot;
+    let snapshot: LayoutState["snapshot"] = null;
+    if (typeof snap === "object" && snap !== null && !Array.isArray(snap)) {
+      const s = snap as Record<string, unknown>;
+      if (
+        isBoolean(s.leftCollapsed) &&
+        isBoolean(s.rightCollapsed) &&
+        isBoolean(s.bottomCollapsed)
+      ) {
+        snapshot = {
+          leftCollapsed: s.leftCollapsed,
+          rightCollapsed: s.rightCollapsed,
+          bottomCollapsed: s.bottomCollapsed,
+        };
+      }
+    }
+    return {
+      leftCollapsed: isBoolean(p.leftCollapsed) ? p.leftCollapsed : false,
+      rightCollapsed: isBoolean(p.rightCollapsed) ? p.rightCollapsed : false,
+      bottomCollapsed: isBoolean(p.bottomCollapsed) ? p.bottomCollapsed : false,
+      mapFocused: isBoolean(p.mapFocused) ? p.mapFocused : false,
+      snapshot,
+    };
+  } catch {
+    return { ...DEFAULT_LAYOUT };
+  }
+}
+
+/**
+ * Persist the layout state to localStorage. Quota/serialization errors are
+ * swallowed (logged as a warning) so a failed write never throws.
+ */
+export function saveLayout(state: LayoutState): void {
+  const storage = getStorage();
+  if (!storage) return;
+  try {
+    storage.setItem(LAYOUT_KEY, JSON.stringify(state));
+  } catch (err) {
+    console.warn("Failed to persist layout to localStorage.", err);
+  }
+}

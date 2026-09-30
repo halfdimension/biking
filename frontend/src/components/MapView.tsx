@@ -223,6 +223,14 @@ export default function MapView() {
   const compareStatus = useStore((s) => s.compareStatus);
   const fitRequestId = useStore((s) => s.fitRequestId);
 
+  // Layout collapse booleans (UI-only). MapView subscribes to them purely to
+  // trigger a `map.resize()` after the sibling panels change size — the map
+  // instance itself is NEVER recreated, so center/zoom/routes/feature-state/
+  // selection/markers/fit all survive a collapse/expand.
+  const leftCollapsed = useStore((s) => s.leftCollapsed);
+  const rightCollapsed = useStore((s) => s.rightCollapsed);
+  const bottomCollapsed = useStore((s) => s.bottomCollapsed);
+
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 
   // --- Map initialization (Task 13.1) --------------------------------------
@@ -495,6 +503,30 @@ export default function MapView() {
         : markerCoords(start, dest);
     fitTo(map, coords);
   }, [fitRequestId, routes, start, dest]);
+
+  // --- Resize on layout collapse/expand (belt-and-suspenders) --------------
+  // The ResizeObserver installed in the init effect already fires when the map
+  // container's box changes (sidebar width / bottom-panel height). But CSS
+  // transitions mean the box changes over ~150ms, and in environments without a
+  // real ResizeObserver (jsdom) it never fires. So when any of the three
+  // collapse booleans change, explicitly resize the map on the next animation
+  // frame (after the DOM layout updates) AND once more after the transition
+  // settles (~200ms), so the FINAL size is always captured. This only calls
+  // `map.resize()` — it never recreates the map or touches route/selection/fit
+  // logic, so all map state is preserved.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const doResize = () => {
+      if (mapRef.current === map && map.resize) map.resize();
+    };
+    const rafId = requestAnimationFrame(doResize);
+    const timeoutId = setTimeout(doResize, 200);
+    return () => {
+      cancelAnimationFrame(rafId);
+      clearTimeout(timeoutId);
+    };
+  }, [leftCollapsed, rightCollapsed, bottomCollapsed]);
 
   const setFromContextMenu = (which: "start" | "dest") => {
     if (!contextMenu) return;

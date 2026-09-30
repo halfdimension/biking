@@ -11,10 +11,13 @@ import { create } from "zustand";
 import * as api from "./api";
 import {
   type AssessmentsMap,
+  type LayoutState,
   deleteAssessmentsFor,
   loadAssessments,
+  loadLayout,
   loadTestCases,
   saveAssessments,
+  saveLayout,
   saveTestCases,
 } from "./persistence";
 import type {
@@ -143,6 +146,30 @@ export interface AppState {
   // counter (rather than a boolean) lets repeated Fit Routes clicks each fire.
   fitRequestId: number;
 
+  // --- Layout UI state (collapsible panels + Focus Map) --------------------
+  // A small, isolated UI-only slice: the three panel-collapse booleans plus the
+  // Focus Map bookkeeping. Kept deliberately separate from routing/results/
+  // assessment state and persisted to its OWN localStorage key
+  // (`biking.layout.v1`), never the testcase/assessment keys. Changing these
+  // only resizes sibling panels via CSS; MapView reacts by calling
+  // `map.resize()` (the map instance is never recreated).
+  /** Left sidebar collapsed to a narrow rail when true. */
+  leftCollapsed: boolean;
+  /** Right sidebar collapsed to a narrow rail when true. */
+  rightCollapsed: boolean;
+  /** Bottom panel body hidden (only the tab strip remains) when true. */
+  bottomCollapsed: boolean;
+  /**
+   * True while "Focus Map" is active — i.e. after the first Focus Map click and
+   * before the restoring second click. Drives the two-state toolbar toggle.
+   */
+  mapFocused: boolean;
+  /**
+   * The pre-focus collapse states captured on the Focus Map click that entered
+   * focused mode, restored on the click that exits it. Null when not focused.
+   */
+  layoutSnapshot: LayoutState["snapshot"];
+
   // --- Actions ---
   setStart: (c: Coordinate | null) => void;
   setDest: (c: Coordinate | null) => void;
@@ -173,6 +200,21 @@ export interface AppState {
 
   /** Request a manual map fit (Req 20.2); MapView reacts to `fitRequestId`. */
   requestFit: () => void;
+
+  // --- Layout UI actions (collapsible panels + Focus Map) ------------------
+  /** Toggle the left sidebar between expanded and the narrow rail. */
+  toggleLeftCollapsed: () => void;
+  /** Toggle the right sidebar between expanded and the narrow rail. */
+  toggleRightCollapsed: () => void;
+  /** Toggle the bottom panel body between shown and hidden (strip stays). */
+  toggleBottomCollapsed: () => void;
+  /**
+   * Focus Map two-state toggle. When NOT focused, snapshot the current three
+   * collapse booleans and collapse all three. When already focused, restore the
+   * snapshot exactly and clear the focused flag. Never touches panel contents or
+   * application state — only the layout slice.
+   */
+  focusMap: () => void;
 
   // --- Saved test cases (Req 13). Isolated from compare/raw/curl slices. ---
   /**
@@ -365,6 +407,27 @@ function updateAssessment(
   saveAssessments(nextAssessments);
 }
 
+/**
+ * Persist only the layout slice to its own localStorage key. Reads the five
+ * layout fields off the given state so callers can pass a merged next-state.
+ * Delegates to the safe `saveLayout` helper, which never throws.
+ */
+function persistLayout(state: {
+  leftCollapsed: boolean;
+  rightCollapsed: boolean;
+  bottomCollapsed: boolean;
+  mapFocused: boolean;
+  layoutSnapshot: LayoutState["snapshot"];
+}): void {
+  saveLayout({
+    leftCollapsed: state.leftCollapsed,
+    rightCollapsed: state.rightCollapsed,
+    bottomCollapsed: state.bottomCollapsed,
+    mapFocused: state.mapFocused,
+    snapshot: state.layoutSnapshot,
+  });
+}
+
 /** Build a visibility map with every provided route set to `visible`. */
 function buildVisibility(
   routes: NormalizedRoute[],
@@ -413,6 +476,20 @@ export const useStore = create<AppState>((set, get) => ({
   lastError: null,
 
   fitRequestId: 0,
+
+  // Hydrate the layout slice from its own localStorage key at store creation,
+  // mirroring the testCases/assessments hydration above. `loadLayout` is safe
+  // and degrades to all-expanded defaults on missing/corrupt data.
+  ...(() => {
+    const l = loadLayout();
+    return {
+      leftCollapsed: l.leftCollapsed,
+      rightCollapsed: l.rightCollapsed,
+      bottomCollapsed: l.bottomCollapsed,
+      mapFocused: l.mapFocused,
+      layoutSnapshot: l.snapshot,
+    };
+  })(),
 
   setStart: (c) => set({ start: c }),
   setDest: (c) => set({ dest: c }),
@@ -536,6 +613,63 @@ export const useStore = create<AppState>((set, get) => ({
   clearSelection: () => set({ selectedRouteId: null }),
 
   requestFit: () => set((state) => ({ fitRequestId: state.fitRequestId + 1 })),
+
+  toggleLeftCollapsed: () =>
+    set((state) => {
+      const next = { ...state, leftCollapsed: !state.leftCollapsed };
+      persistLayout(next);
+      return { leftCollapsed: next.leftCollapsed };
+    }),
+
+  toggleRightCollapsed: () =>
+    set((state) => {
+      const next = { ...state, rightCollapsed: !state.rightCollapsed };
+      persistLayout(next);
+      return { rightCollapsed: next.rightCollapsed };
+    }),
+
+  toggleBottomCollapsed: () =>
+    set((state) => {
+      const next = { ...state, bottomCollapsed: !state.bottomCollapsed };
+      persistLayout(next);
+      return { bottomCollapsed: next.bottomCollapsed };
+    }),
+
+  focusMap: () =>
+    set((state) => {
+      if (!state.mapFocused) {
+        // Enter focused mode: snapshot the current states, collapse all three.
+        const snapshot = {
+          leftCollapsed: state.leftCollapsed,
+          rightCollapsed: state.rightCollapsed,
+          bottomCollapsed: state.bottomCollapsed,
+        };
+        const next = {
+          leftCollapsed: true,
+          rightCollapsed: true,
+          bottomCollapsed: true,
+          mapFocused: true,
+          layoutSnapshot: snapshot,
+        };
+        persistLayout({ ...state, ...next });
+        return next;
+      }
+      // Exit focused mode: restore the exact prior states from the snapshot.
+      const snap = state.layoutSnapshot ?? {
+        leftCollapsed: false,
+        rightCollapsed: false,
+        bottomCollapsed: false,
+      };
+      const next = {
+        leftCollapsed: snap.leftCollapsed,
+        rightCollapsed: snap.rightCollapsed,
+        bottomCollapsed: snap.bottomCollapsed,
+        mapFocused: false,
+        layoutSnapshot: null,
+      };
+      persistLayout({ ...state, ...next });
+      return next;
+    }),
 
   saveTestCase: (name) => {
     const { start, dest, testCases } = get();

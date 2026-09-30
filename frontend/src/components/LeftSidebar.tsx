@@ -92,26 +92,53 @@ function ModeToggle() {
 }
 
 export default function LeftSidebar() {
+  const collapsed = useStore((s) => s.leftCollapsed);
+  const toggle = useStore((s) => s.toggleLeftCollapsed);
+
   return (
-    <aside className="left-sidebar" aria-label="Controls">
-      <Section title="Coordinates">
-        <CoordinateInputs />
-      </Section>
-      <Section title="Map Selection">
-        <MapSelection />
-      </Section>
-      <Section title="Request Options">
-        <ModeToggle />
-      </Section>
-      <Section title="Request Preview">
-        <RequestPreview />
-      </Section>
-      <Section title="Saved Test Cases">
-        <TestCases />
-      </Section>
-      <Section title="Curl Import">
-        <CurlImport />
-      </Section>
+    <aside
+      className={"left-sidebar" + (collapsed ? " left-sidebar--collapsed" : "")}
+      aria-label="Controls"
+    >
+      {/* Collapse/expand chevron near the sidebar's inner (right) edge. When
+          collapsed only this control is rendered, so the sidebar shows a narrow
+          rail with a reachable expand affordance. Contents read from the store,
+          so simply not rendering them while collapsed loses no application
+          state. */}
+      <button
+        type="button"
+        className="panel-collapse panel-collapse--left"
+        data-testid="collapse-left"
+        aria-expanded={!collapsed}
+        aria-label={collapsed ? "Expand left panel" : "Collapse left panel"}
+        title={collapsed ? "Expand left panel" : "Collapse left panel"}
+        onClick={toggle}
+      >
+        {collapsed ? "›" : "‹"}
+      </button>
+
+      {!collapsed && (
+        <div className="left-sidebar__content">
+          <Section title="Coordinates">
+            <CoordinateInputs />
+          </Section>
+          <Section title="Map Selection">
+            <MapSelection />
+          </Section>
+          <Section title="Request Options">
+            <ModeToggle />
+          </Section>
+          <Section title="Request Preview">
+            <RequestPreview />
+          </Section>
+          <Section title="Saved Test Cases">
+            <TestCases />
+          </Section>
+          <Section title="Curl Import">
+            <CurlImport />
+          </Section>
+        </div>
+      )}
     </aside>
   );
 }

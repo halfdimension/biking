@@ -94,6 +94,9 @@ def build_default_valhalla_body(start: Coordinate, dest: Coordinate) -> dict[str
         "alternates": 10,
         "shape_format": "polyline6",
         "directions_options": {"units": "kilometers"},
+        "costing_options": {"motorcycle": {"speed_types": ["current"]}},
+        "date_time": {"type": 0}
+        # "prioritize_bidirectional":true
     }
 
 

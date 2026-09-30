@@ -40,6 +40,7 @@ function HealthIndicator({
 export default function Toolbar() {
   const runCompare = useStore((s) => s.runCompare);
   const requestFit = useStore((s) => s.requestFit);
+  const focusMap = useStore((s) => s.focusMap);
   const compareStatus = useStore((s) => s.compareStatus);
   const lastError = useStore((s) => s.lastError);
   const health = useStore((s) => s.health);
@@ -70,6 +71,19 @@ export default function Toolbar() {
         onClick={() => requestFit()}
       >
         Fit Routes
+      </button>
+
+      {/* Focus Map: a two-state toggle. First click collapses all three panels
+          (remembering their prior states); a second click restores them. UI
+          layout only — never touches routing/results/selection. */}
+      <button
+        type="button"
+        className="toolbar__focus-btn"
+        data-testid="focus-map"
+        title="Focus Map"
+        onClick={() => focusMap()}
+      >
+        Focus Map
       </button>
 
       {compareStatus === "error" && lastError ? (
