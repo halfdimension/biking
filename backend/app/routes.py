@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import dataclass
 from typing import Any, Callable
 from urllib.parse import urlsplit
 
@@ -22,19 +23,51 @@ from app.engines import EngineCallResult, call_engine, is_host_allowed, probe_en
 from app.models import (
     CompareRequest,
     CompareResponse,
+    CompareDebug,
     Coordinate,
     CurlImportRequest,
     CurlImportResponse,
     EngineError,
+    EngineDebugResult,
     EngineResult,
     HealthResponse,
     OsrmRawRequest,
     ValhallaRawRequest,
 )
-from app.osrm import build_default_osrm_url, normalize_osrm_response
+from app.osrm import build_default_osrm_url, build_osrm_debug, normalize_osrm_response
 from app.valhalla import build_default_valhalla_body, normalize_valhalla_response
+from app.valhalla_pbf import (
+    build_valhalla_debug,
+    build_valhalla_pbf_request,
+    normalize_valhalla_pbf_response,
+    parse_valhalla_pbf,
+)
 
 router = APIRouter(prefix="/api")
+
+
+@dataclass
+class _CompareOutcome:
+    result: EngineResult
+    debug: EngineDebugResult | None = None
+
+
+def _debug_failure(engine: str, message: str, detail: Any = None) -> EngineDebugResult:
+    """Build a debug-only failure without altering the engine route envelope."""
+    from app.models import DebugError
+
+    return EngineDebugResult(
+        engine=engine,
+        status="error",
+        segments=[],
+        errors=[
+            DebugError(
+                kind="debug_unavailable",
+                message=message,
+                detail=detail,
+            )
+        ],
+    )
 
 
 def _decode_json(result: EngineCallResult) -> tuple[Any, bool]:
@@ -128,7 +161,9 @@ def _handle_engine_call(
     return normalize(body)
 
 
-async def _run_osrm(start: Coordinate, dest: Coordinate) -> EngineResult:
+async def _run_osrm(
+    start: Coordinate, dest: Coordinate, include_debug: bool = False
+) -> _CompareOutcome:
     """Call OSRM with the canonical request and normalize into an envelope.
 
     Builds the canonical ``Default_OSRM_Request`` URL, issues a GET through the
@@ -146,7 +181,7 @@ async def _run_osrm(start: Coordinate, dest: Coordinate) -> EngineResult:
     url = build_default_osrm_url(start, dest)
     result = await call_engine("GET", url)
 
-    return _handle_engine_call(
+    envelope = _handle_engine_call(
         "osrm",
         result,
         lambda body: normalize_osrm_response(
@@ -155,9 +190,28 @@ async def _run_osrm(start: Coordinate, dest: Coordinate) -> EngineResult:
             http_status=result.http_status,
         ),
     )
+    debug = None
+    if include_debug:
+        body, decoded = _decode_json(result)
+        if result.ok and decoded:
+            try:
+                debug = build_osrm_debug(body)
+            except Exception as exc:  # debug must never affect normal routes
+                debug = _debug_failure(
+                    "osrm", "Unexpected OSRM debug extraction failure.", str(exc)
+                )
+        else:
+            debug = _debug_failure(
+                "osrm",
+                "OSRM debug data is unavailable because the route call failed.",
+                result.error.model_dump(by_alias=True) if result.error else None,
+            )
+    return _CompareOutcome(result=envelope, debug=debug)
 
 
-async def _run_valhalla(start: Coordinate, dest: Coordinate) -> EngineResult:
+async def _run_valhalla(
+    start: Coordinate, dest: Coordinate, include_debug: bool = False
+) -> _CompareOutcome:
     """Call Valhalla with the canonical request and normalize into an envelope.
 
     Builds the canonical ``Default_Valhalla_Request`` body, POSTs it to
@@ -170,22 +224,77 @@ async def _run_valhalla(start: Coordinate, dest: Coordinate) -> EngineResult:
     Never raises: guarded by the fan-out for defense-in-depth (Req 2.2, 2.3,
     17.13).
     """
-    body = build_default_valhalla_body(start, dest)
     url = f"{config.VALHALLA_BASE_URL}/route"
-    request_units = body.get("directions_options", {}).get("units")
+    if not include_debug:
+        body = build_default_valhalla_body(start, dest)
+        request_units = body.get("directions_options", {}).get("units")
+        result = await call_engine("POST", url, json=body)
+        envelope = _handle_engine_call(
+            "valhalla",
+            result,
+            lambda parsed: normalize_valhalla_response(
+                parsed,
+                duration_ms=result.duration_ms,
+                http_status=result.http_status,
+                request_units=request_units,
+            ),
+        )
+        return _CompareOutcome(result=envelope)
 
-    result = await call_engine("POST", url, json=body)
-
-    return _handle_engine_call(
-        "valhalla",
-        result,
-        lambda parsed: normalize_valhalla_response(
-            parsed,
-            duration_ms=result.duration_ms,
-            http_status=result.http_status,
-            request_units=request_units,
-        ),
+    payload = build_valhalla_pbf_request(start, dest)
+    result = await call_engine(
+        "POST",
+        url,
+        content=payload,
+        headers={
+            "Content-Type": "application/x-protobuf",
+            "Accept": "application/x-protobuf",
+        },
     )
+    if not result.ok:
+        return _CompareOutcome(
+            result=_error_envelope("valhalla", result),
+            debug=_debug_failure(
+                "valhalla",
+                "Valhalla debug data is unavailable because the PBF route call failed.",
+                result.error.model_dump(by_alias=True) if result.error else None,
+            ),
+        )
+
+    try:
+        api = parse_valhalla_pbf(result.response.content if result.response else b"")
+    except ValueError as exc:
+        envelope = EngineResult(
+            engine="valhalla",
+            status="error",
+            http_status=result.http_status,
+            duration_ms=result.duration_ms,
+            normalized_routes=[],
+            raw=None,
+            warnings=[],
+            error=EngineError(
+                kind="invalid_response",
+                message="Valhalla returned an invalid protobuf route response.",
+                detail=str(exc),
+            ),
+        )
+        return _CompareOutcome(
+            result=envelope,
+            debug=_debug_failure("valhalla", envelope.error.message, str(exc)),
+        )
+
+    envelope = normalize_valhalla_pbf_response(
+        api,
+        duration_ms=result.duration_ms,
+        http_status=result.http_status,
+    )
+    try:
+        debug = build_valhalla_debug(api)
+    except Exception as exc:  # debug must never affect the Directions result
+        debug = _debug_failure(
+            "valhalla", "Unexpected Valhalla debug extraction failure.", str(exc)
+        )
+    return _CompareOutcome(result=envelope, debug=debug)
 
 
 def _exception_envelope(engine: str, exc: BaseException) -> EngineResult:
@@ -212,7 +321,11 @@ def _exception_envelope(engine: str, exc: BaseException) -> EngineResult:
     )
 
 
-@router.post("/compare", response_model=CompareResponse)
+@router.post(
+    "/compare",
+    response_model=CompareResponse,
+    response_model_exclude_unset=True,
+)
 async def compare(request: CompareRequest) -> CompareResponse:
     """Fan out to both engines concurrently and return per-engine envelopes.
 
@@ -228,23 +341,50 @@ async def compare(request: CompareRequest) -> CompareResponse:
     alters the other (Req 2.4, 2.5, 2.7, 17.13).
     """
     osrm_outcome, valhalla_outcome = await asyncio.gather(
-        _run_osrm(request.start, request.dest),
-        _run_valhalla(request.start, request.dest),
+        _run_osrm(request.start, request.dest, request.include_debug),
+        _run_valhalla(request.start, request.dest, request.include_debug),
         return_exceptions=True,
     )
 
-    osrm_result = (
-        osrm_outcome
-        if isinstance(osrm_outcome, EngineResult)
-        else _exception_envelope("osrm", osrm_outcome)
-    )
-    valhalla_result = (
-        valhalla_outcome
-        if isinstance(valhalla_outcome, EngineResult)
-        else _exception_envelope("valhalla", valhalla_outcome)
-    )
+    if isinstance(osrm_outcome, _CompareOutcome):
+        osrm = osrm_outcome
+    else:
+        osrm = _CompareOutcome(
+            result=_exception_envelope("osrm", osrm_outcome),
+            debug=(
+                _debug_failure("osrm", "Unexpected OSRM processing failure.", str(osrm_outcome))
+                if request.include_debug
+                else None
+            ),
+        )
+    if isinstance(valhalla_outcome, _CompareOutcome):
+        valhalla = valhalla_outcome
+    else:
+        valhalla = _CompareOutcome(
+            result=_exception_envelope("valhalla", valhalla_outcome),
+            debug=(
+                _debug_failure(
+                    "valhalla",
+                    "Unexpected Valhalla processing failure.",
+                    str(valhalla_outcome),
+                )
+                if request.include_debug
+                else None
+            ),
+        )
 
-    return CompareResponse(osrm=osrm_result, valhalla=valhalla_result)
+    if request.include_debug:
+        return CompareResponse(
+            osrm=osrm.result,
+            valhalla=valhalla.result,
+            debug=CompareDebug(
+                osrm=osrm.debug
+                or _debug_failure("osrm", "OSRM debug data is unavailable."),
+                valhalla=valhalla.debug
+                or _debug_failure("valhalla", "Valhalla debug data is unavailable."),
+            ),
+        )
+    return CompareResponse(osrm=osrm.result, valhalla=valhalla.result)
 
 
 @router.post("/osrm/raw", response_model=EngineResult)

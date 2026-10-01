@@ -24,6 +24,9 @@ from typing import Any
 from app import config
 from app.models import (
     Coordinate,
+    DebugError,
+    DebugSegment,
+    EngineDebugResult,
     EngineError,
     EngineResult,
     NormalizedRoute,
@@ -45,6 +48,14 @@ DEFAULT_OSRM_QUERY = (
 
 # The OSRM engine identifier used across normalized models.
 _ENGINE = "osrm"
+
+_ANNOTATION_SEGMENT_FIELDS = (
+    "distance",
+    "duration",
+    "weight",
+    "speed",
+    "datasources",
+)
 
 
 def build_default_osrm_url(
@@ -224,4 +235,196 @@ def normalize_osrm_response(
         raw=raw,
         warnings=warnings,
         error=None,
+    )
+
+
+def build_osrm_debug(raw: Any) -> EngineDebugResult:
+    """Map normal ``/route`` annotations onto the unsimplified route geometry.
+
+    OSRM emits one value per geometry segment for every requested annotation
+    except ``nodes``, which has one value per geometry point.  This function
+    validates those invariants for every returned leg and also validates the
+    route-wide ``geometry points == total leg segments + 1`` invariant before
+    creating any segments for that route.  A failed route is reported as a
+    debug-only alignment error; no offset or geometry is guessed.
+    """
+    segments: list[DebugSegment] = []
+    errors: list[DebugError] = []
+    routes = raw.get("routes") if isinstance(raw, dict) else None
+    if not isinstance(routes, list) or not routes:
+        return EngineDebugResult(
+            engine=_ENGINE,
+            status="error",
+            errors=[
+                DebugError(
+                    kind="debug_alignment_error",
+                    message="OSRM response has no routes for debug extraction.",
+                )
+            ],
+        )
+
+    for route_index, route in enumerate(routes):
+        if not isinstance(route, dict):
+            errors.append(
+                DebugError(
+                    kind="debug_alignment_error",
+                    route_index=route_index,
+                    message=f"OSRM route {route_index} is not an object.",
+                )
+            )
+            continue
+
+        try:
+            coordinates = decode_polyline6(route.get("geometry") or "")
+        except PolylineDecodeError as exc:
+            errors.append(
+                DebugError(
+                    kind="debug_geometry_error",
+                    route_index=route_index,
+                    message=f"Could not decode OSRM route {route_index} geometry.",
+                    detail=str(exc),
+                )
+            )
+            continue
+
+        legs = route.get("legs")
+        if not isinstance(legs, list) or not legs:
+            errors.append(
+                DebugError(
+                    kind="debug_alignment_error",
+                    route_index=route_index,
+                    message=f"OSRM route {route_index} has no annotated legs.",
+                )
+            )
+            continue
+
+        # Validate everything first so a bad later leg cannot leave a partially
+        # constructed route in the payload.
+        validated_legs: list[tuple[int, dict[str, list[Any]], list[str]]] = []
+        total_segment_count = 0
+        route_error: DebugError | None = None
+        for leg_index, leg in enumerate(legs):
+            annotation = leg.get("annotation") if isinstance(leg, dict) else None
+            if not isinstance(annotation, dict):
+                route_error = DebugError(
+                    kind="debug_alignment_error",
+                    route_index=route_index,
+                    leg_index=leg_index,
+                    message=(
+                        f"OSRM route {route_index} leg {leg_index} has no "
+                        "annotation object."
+                    ),
+                )
+                break
+
+            arrays: dict[str, list[Any]] = {}
+            for field in (*_ANNOTATION_SEGMENT_FIELDS, "nodes"):
+                value = annotation.get(field)
+                if not isinstance(value, list):
+                    route_error = DebugError(
+                        kind="debug_alignment_error",
+                        route_index=route_index,
+                        leg_index=leg_index,
+                        message=(
+                            f"OSRM route {route_index} leg {leg_index} annotation "
+                            f"{field!r} is missing or is not an array."
+                        ),
+                    )
+                    break
+                arrays[field] = value
+            if route_error is not None:
+                break
+
+            count = len(arrays["distance"])
+            bad_lengths = {
+                field: len(arrays[field])
+                for field in _ANNOTATION_SEGMENT_FIELDS
+                if len(arrays[field]) != count
+            }
+            if len(arrays["nodes"]) != count + 1:
+                bad_lengths["nodes"] = len(arrays["nodes"])
+            if bad_lengths:
+                route_error = DebugError(
+                    kind="debug_alignment_error",
+                    route_index=route_index,
+                    leg_index=leg_index,
+                    message=(
+                        f"OSRM route {route_index} leg {leg_index} annotation "
+                        "array lengths do not match the segment/node invariant."
+                    ),
+                    detail={"segmentCount": count, "lengths": bad_lengths},
+                )
+                break
+
+            metadata = annotation.get("metadata")
+            names = metadata.get("datasource_names") if isinstance(metadata, dict) else []
+            datasource_names = names if isinstance(names, list) else []
+            validated_legs.append((count, arrays, datasource_names))
+            total_segment_count += count
+
+        if route_error is not None:
+            errors.append(route_error)
+            continue
+
+        if len(coordinates) != total_segment_count + 1:
+            errors.append(
+                DebugError(
+                    kind="debug_alignment_error",
+                    route_index=route_index,
+                    message=(
+                        f"OSRM route {route_index} geometry has {len(coordinates)} "
+                        f"points but its annotations describe {total_segment_count} "
+                        "segments."
+                    ),
+                    detail={
+                        "geometryPointCount": len(coordinates),
+                        "annotationSegmentCount": total_segment_count,
+                    },
+                )
+            )
+            continue
+
+        offset = 0
+        for leg_index, (count, arrays, datasource_names) in enumerate(validated_legs):
+            for segment_index in range(count):
+                datasource = arrays["datasources"][segment_index]
+                datasource_name = None
+                if isinstance(datasource, int) and 0 <= datasource < len(datasource_names):
+                    datasource_name = datasource_names[datasource]
+                properties = {
+                    field: arrays[field][segment_index]
+                    for field in _ANNOTATION_SEGMENT_FIELDS
+                }
+                properties.update(
+                    {
+                        "datasource": datasource,
+                        "fromNodeId": str(arrays["nodes"][segment_index]),
+                        "toNodeId": str(arrays["nodes"][segment_index + 1]),
+                        "datasourceName": datasource_name,
+                    }
+                )
+                geometry_index = offset + segment_index
+                segments.append(
+                    DebugSegment(
+                        id=f"osrm:{route_index}:{leg_index}:{segment_index}",
+                        engine=_ENGINE,
+                        route_id=f"osrm:{route_index}",
+                        route_index=route_index,
+                        leg_index=leg_index,
+                        segment_index=segment_index,
+                        coordinates=[
+                            coordinates[geometry_index],
+                            coordinates[geometry_index + 1],
+                        ],
+                        properties=properties,
+                    )
+                )
+            offset += count
+
+    status = "ok" if not errors else ("partial" if segments else "error")
+    return EngineDebugResult(
+        engine=_ENGINE,
+        status=status,
+        segments=segments,
+        errors=errors,
     )

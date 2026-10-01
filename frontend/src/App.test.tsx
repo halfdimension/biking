@@ -104,11 +104,12 @@ describe("App layout shell", () => {
     expect(screen.getByTestId("map-view")).toBeInTheDocument();
   });
 
-  it("renders all six bottom tab labels", async () => {
+  it("renders all seven bottom tab labels", async () => {
     await renderApp();
     const tablist = screen.getByRole("tablist", { name: /Analysis panels/i });
     const labels = [
       "Comparison",
+      "Edge Details",
       "OSRM Raw Request",
       "OSRM Response",
       "Valhalla Raw Request",
@@ -133,6 +134,14 @@ describe("App layout shell", () => {
     // ("run Compare to assess routes") distinct from the Comparison table.
     fireEvent.click(screen.getByRole("tab", { name: "Assessment" }));
     expect(panel).toHaveTextContent(/run Compare to assess routes/i);
+  });
+
+  it("keeps the right sidebar focused on route controls", async () => {
+    await renderApp();
+    const sidebar = screen.getByLabelText("Routes");
+    expect(within(sidebar).getByText("Engine Status")).toBeInTheDocument();
+    expect(within(sidebar).getByText("Visibility Controls")).toBeInTheDocument();
+    expect(within(sidebar).queryByText("Pinned edge details")).not.toBeInTheDocument();
   });
 
   it("stays fully usable when an engine reports unreachable (Req 16.5)", async () => {

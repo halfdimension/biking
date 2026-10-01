@@ -40,6 +40,10 @@ from app.polyline import PolylineDecodeError, decode_polyline6
 # The Valhalla engine identifier used across normalized models.
 _ENGINE = "valhalla"
 
+# Shared by JSON and PBF request builders so Edge Debug cannot drift from the
+# dashboard's configured alternate-route behavior.
+DEFAULT_ALTERNATES = 10
+
 # Conversion factors from the reported summary length unit to meters. Distance
 # units are unit-aware and must never be permanently assumed to be kilometers
 # (design: normalizeValhallaResponse). Both the long and short spellings are
@@ -91,7 +95,7 @@ def build_default_valhalla_body(start: Coordinate, dest: Coordinate) -> dict[str
             {"lat": dest.lat, "lon": dest.lon, "type": "break"},
         ],
         "costing": "motorcycle",
-        "alternates": 10,
+        "alternates": DEFAULT_ALTERNATES,
         "shape_format": "polyline6",
         "directions_options": {"units": "kilometers"},
         "costing_options": {"motorcycle": {"speed_types": ["current"]}},

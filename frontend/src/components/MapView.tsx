@@ -30,16 +30,28 @@ import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useStore } from "../store";
+import EdgeDebugInspector from "./EdgeDebugInspector";
 import { resolveMapStyle } from "../map/style";
 import { buildRoutesFeatureCollection } from "../map/routes";
 import {
+  buildDebugSegmentsFeatureCollection,
+  DEBUG_SEGMENTS_SOURCE_ID,
+} from "../map/debugSegments";
+import {
   ROUTES_SOURCE_ID,
   HIT_LAYER_ID,
+  DEBUG_HIT_LAYER_ID,
   hitLayerSpec,
   baseLayerSpec,
   selectedLayerSpec,
+  debugHighlightLayerSpec,
+  debugHitLayerSpec,
 } from "../map/layers";
 import { resolveSelectedRouteId, type RouteCandidate } from "../map/hitTest";
+import {
+  resolveDebugSegmentIds,
+  type RenderedDebugFeature,
+} from "../map/debugHitTest";
 import {
   collectRouteCoords,
   computeBounds,
@@ -205,6 +217,7 @@ export default function MapView() {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const startMarkerRef = useRef<maplibregl.Marker | null>(null);
   const destMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const previousActiveDebugIdsRef = useRef<string[]>([]);
 
   const start = useStore((s) => s.start);
   const dest = useStore((s) => s.dest);
@@ -216,6 +229,11 @@ export default function MapView() {
   const routes = useStore((s) => s.routes);
   const visibility = useStore((s) => s.visibility);
   const selectedRouteId = useStore((s) => s.selectedRouteId);
+  // Edge-debug is a separate source/layer path; normal routes remain untouched.
+  const edgeDebugEnabled = useStore((s) => s.edgeDebugEnabled);
+  const debugResults = useStore((s) => s.debugResults);
+  const hoveredDebugSegmentIds = useStore((s) => s.hoveredDebugSegmentIds);
+  const pinnedDebugSegmentIds = useStore((s) => s.pinnedDebugSegmentIds);
 
   // Map fitting inputs (Task 18.1). `compareStatus` drives the auto-fit after a
   // successful Compare; `fitRequestId` is a monotonic counter bumped by the
@@ -232,6 +250,7 @@ export default function MapView() {
   const bottomCollapsed = useStore((s) => s.bottomCollapsed);
 
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [tilted, setTilted] = useState(false);
 
   // --- Map initialization (Task 13.1) --------------------------------------
   useEffect(() => {
@@ -298,16 +317,55 @@ export default function MapView() {
     const resizeObserver = new ResizeObserver(() => doResize());
     resizeObserver.observe(container);
 
-    // Left click: when a "Set ... on Map" control is armed, set that coord and
-    // disarm (Req 1.2, 1.3). We read the current target from the store at click
-    // time so this handler need not be re-bound as the target changes.
-    //
-    // When NO map-click target is armed, the click performs route selection
-    // hit-testing instead (Task 21.1, Req 6.1). A click on the empty basemap
-    // (no route candidates) leaves the selection unchanged — clearing is only
-    // via the explicit "Clear selection" control.
+    let debugMoveFrame: number | null = null;
+
+    // Throttled 6px-box hit test. All rendered candidates are retained; the
+    // pure resolver removes only tile duplicates and explicitly hidden routes.
+    const handleMouseMove = (e: maplibregl.MapMouseEvent) => {
+      const state = useStore.getState();
+      if (!state.edgeDebugEnabled) return;
+      if (debugMoveFrame !== null) cancelAnimationFrame(debugMoveFrame);
+      const { x, y } = e.point;
+      const hoverPoint: [number, number] = [e.lngLat.lng, e.lngLat.lat];
+      debugMoveFrame = requestAnimationFrame(() => {
+        debugMoveFrame = null;
+        let features: maplibregl.MapGeoJSONFeature[] = [];
+        try {
+          features = map.queryRenderedFeatures(
+            [
+              [x - 6, y - 6],
+              [x + 6, y + 6],
+            ],
+            { layers: [DEBUG_HIT_LAYER_ID] },
+          );
+        } catch {
+          // The debug source/layer has not been created yet.
+        }
+        const current = useStore.getState();
+        current.setHoveredDebugSegmentIds(
+          resolveDebugSegmentIds(
+            features as unknown as RenderedDebugFeature[],
+            current.visibility,
+          ),
+          hoverPoint,
+        );
+      });
+    };
+
+    const handleMouseLeave = () => {
+      if (debugMoveFrame !== null) {
+        cancelAnimationFrame(debugMoveFrame);
+        debugMoveFrame = null;
+      }
+      const state = useStore.getState();
+      if (state.edgeDebugEnabled) {
+        state.setHoveredDebugSegmentIds([], null);
+      }
+    };
+
+    // Route selection remains the primary click behavior. Debug pinning runs
+    // afterwards and does not stop propagation or replace routes-hit.
     const handleClick = (e: maplibregl.MapMouseEvent) => {
-      // Any left click dismisses an open context menu.
       setContextMenu(null);
       const target = useStore.getState().mapClickTarget;
       if (target) {
@@ -321,6 +379,10 @@ export default function MapView() {
         return;
       }
       selectRouteFromClick(map, e.point);
+      const state = useStore.getState();
+      if (state.edgeDebugEnabled && state.hoveredDebugSegmentIds.length > 0) {
+        state.pinHoveredDebugSegments();
+      }
     };
 
     // Right click: open a context menu at the cursor (Req 1.4).
@@ -333,12 +395,17 @@ export default function MapView() {
       });
     };
 
+    map.on("mousemove", handleMouseMove);
+    map.on("mouseleave", handleMouseLeave);
     map.on("click", handleClick);
     map.on("contextmenu", handleContextMenu);
 
     return () => {
       cancelAnimationFrame(rafId);
+      if (debugMoveFrame !== null) cancelAnimationFrame(debugMoveFrame);
       resizeObserver.disconnect();
+      map.off("mousemove", handleMouseMove);
+      map.off("mouseleave", handleMouseLeave);
       map.off("click", handleClick);
       map.off("contextmenu", handleContextMenu);
       map.off("error", handleMapError);
@@ -466,6 +533,113 @@ export default function MapView() {
     applyFeatureState(map, routes, visibility, selectedRouteId);
   }, [routes, visibility, selectedRouteId]);
 
+  // --- Independent edge-debug source + layers -------------------------------
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const apply = () => {
+      const existing = map.getSource(DEBUG_SEGMENTS_SOURCE_ID) as
+        | maplibregl.GeoJSONSource
+        | undefined;
+
+      // An existing GeoJSON source can accept setData while the style is
+      // settling. Only source/layer creation needs a fully loaded style.
+      if (!existing && (!map.isStyleLoaded || !map.isStyleLoaded())) return;
+
+      // OFF before first use means no debug source/layers are created at all.
+      if (!edgeDebugEnabled && !existing) return;
+
+      const data = buildDebugSegmentsFeatureCollection(
+        edgeDebugEnabled ? debugResults : null,
+        visibility,
+      );
+      if (existing) {
+        existing.setData(data as unknown as GeoJSON.FeatureCollection);
+      } else {
+        map.addSource(DEBUG_SEGMENTS_SOURCE_ID, {
+          type: "geojson",
+          promoteId: "debugSegmentId",
+          data: data as unknown as GeoJSON.FeatureCollection,
+        });
+        if (!map.getLayer(debugHighlightLayerSpec(DEBUG_SEGMENTS_SOURCE_ID).id)) {
+          map.addLayer(
+            debugHighlightLayerSpec(
+              DEBUG_SEGMENTS_SOURCE_ID,
+            ) as maplibregl.LayerSpecification,
+          );
+        }
+        if (!map.getLayer(debugHitLayerSpec(DEBUG_SEGMENTS_SOURCE_ID).id)) {
+          map.addLayer(
+            debugHitLayerSpec(
+              DEBUG_SEGMENTS_SOURCE_ID,
+            ) as maplibregl.LayerSpecification,
+          );
+        }
+      }
+
+      // setData clears feature-state; restore the current exact highlight set.
+      const state = useStore.getState();
+      const active = Array.from(
+        new Set([
+          ...state.hoveredDebugSegmentIds,
+          ...state.pinnedDebugSegmentIds,
+        ]),
+      );
+      for (const id of active) {
+        map.setFeatureState(
+          { source: DEBUG_SEGMENTS_SOURCE_ID, id },
+          {
+            hovered:
+              state.edgeDebugEnabled && state.hoveredDebugSegmentIds.includes(id),
+            pinned:
+              state.edgeDebugEnabled && state.pinnedDebugSegmentIds.includes(id),
+          },
+        );
+      }
+      previousActiveDebugIdsRef.current = state.edgeDebugEnabled ? active : [];
+    };
+
+    const canApplyNow =
+      Boolean(map.getSource(DEBUG_SEGMENTS_SOURCE_ID)) ||
+      Boolean(map.isStyleLoaded && map.isStyleLoaded());
+    if (canApplyNow) {
+      apply();
+    } else if (map.once) {
+      map.once("idle", apply);
+      return () => {
+        map.off("idle", apply);
+      };
+    }
+  }, [debugResults, edgeDebugEnabled, visibility]);
+
+  // Update only feature-state on hover/pin changes; never rebuild GeoJSON on
+  // mousemove.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map?.setFeatureState || !map.getSource(DEBUG_SEGMENTS_SOURCE_ID)) return;
+
+    for (const id of previousActiveDebugIdsRef.current) {
+      map.setFeatureState(
+        { source: DEBUG_SEGMENTS_SOURCE_ID, id },
+        { hovered: false, pinned: false },
+      );
+    }
+    const next = edgeDebugEnabled
+      ? Array.from(new Set([...hoveredDebugSegmentIds, ...pinnedDebugSegmentIds]))
+      : [];
+    for (const id of next) {
+      map.setFeatureState(
+        { source: DEBUG_SEGMENTS_SOURCE_ID, id },
+        {
+          hovered: hoveredDebugSegmentIds.includes(id),
+          pinned: pinnedDebugSegmentIds.includes(id),
+        },
+      );
+    }
+    previousActiveDebugIdsRef.current = next;
+  }, [hoveredDebugSegmentIds, pinnedDebugSegmentIds, edgeDebugEnabled]);
+
   // --- Auto-fit after a successful Compare (Task 18.1, Req 20.1) -----------
   // When a Compare completes ("done") and produced routes, frame the combined
   // bounds of all valid returned routes. Keyed on `compareStatus` + `routes`
@@ -528,6 +702,16 @@ export default function MapView() {
     };
   }, [leftCollapsed, rightCollapsed, bottomCollapsed]);
 
+  const toggleTilt = () => {
+    const next = !tilted;
+    mapRef.current?.easeTo?.({
+      pitch: next ? 48 : 0,
+      bearing: next ? -18 : 0,
+      duration: 500,
+    });
+    setTilted(next);
+  };
+
   const setFromContextMenu = (which: "start" | "dest") => {
     if (!contextMenu) return;
     const coord: Coordinate = {
@@ -545,6 +729,16 @@ export default function MapView() {
   return (
     <div className="map-view" data-testid="map-view" aria-label="Map">
       <div ref={containerRef} className="map-view__canvas" data-testid="map-canvas" />
+      <button
+        type="button"
+        className={"map-tilt" + (tilted ? " map-tilt--active" : "")}
+        aria-pressed={tilted}
+        title="Tilt the map camera. True 3D buildings require a vector building source."
+        onClick={toggleTilt}
+      >
+        {tilted ? "2D view" : "Tilt map"}
+      </button>
+      <EdgeDebugInspector />
       {contextMenu && (
         <div
           className="map-context-menu"

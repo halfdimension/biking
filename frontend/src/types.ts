@@ -89,10 +89,116 @@ export interface EngineResult {
   error: EngineError | null;
 }
 
+/** OSRM annotation values for one geometry segment. */
+export interface OsrmDebugProperties {
+  distance: number;
+  duration: number;
+  weight: number;
+  speed: number;
+  datasources: number;
+  datasource: number;
+  datasourceName: string | null;
+  /** Kept as strings because OSM node ids may exceed JS integer precision. */
+  fromNodeId: string;
+  toNodeId: string;
+}
+
+export interface ValhallaCost {
+  seconds: number;
+  cost: number;
+}
+
+export interface ValhallaPathCost {
+  elapsedCost: ValhallaCost;
+  transitionCost: ValhallaCost;
+}
+
+/** Decoded TripLeg.Edge and Node fields emitted by the PBF backend. */
+export interface ValhallaDebugProperties {
+  /** Valhalla graph edge id; deliberately not converted to a JS number. */
+  id: string;
+  /** OSM way id; deliberately not converted to a JS number. */
+  wayId: string;
+  name: string[];
+  lengthKm: number;
+  speed: number;
+  roadClass: string;
+  beginShapeIndex: number;
+  endShapeIndex: number;
+  traversability: string;
+  use: string;
+  toll: boolean;
+  unpaved: boolean;
+  tunnel: boolean;
+  bridge: boolean;
+  roundabout: boolean;
+  surface: string;
+  density: number;
+  speedLimit: number;
+  defaultSpeed: number;
+  sourceAlongEdge: number;
+  targetAlongEdge: number;
+  spdLmt: number;
+  spdLmtHgv: number;
+  spdLmtBike: number;
+  frc: number;
+  tollRoad: number;
+  bikeSpeed: number;
+  nodeCost: ValhallaPathCost;
+  sourceNodeCost: ValhallaPathCost;
+  targetNodeCost: ValhallaPathCost | null;
+}
+
+interface DebugSegmentBase {
+  id: string;
+  routeId: string;
+  routeIndex: number;
+  legIndex: number;
+  segmentIndex: number;
+  /** One edge may contain several shape points (notably Valhalla edges). */
+  coordinates: [number, number][];
+}
+
+export interface OsrmDebugSegment extends DebugSegmentBase {
+  engine: "osrm";
+  properties: OsrmDebugProperties;
+}
+
+export interface ValhallaDebugSegment extends DebugSegmentBase {
+  engine: "valhalla";
+  properties: ValhallaDebugProperties;
+}
+
+export type DebugSegment = OsrmDebugSegment | ValhallaDebugSegment;
+
+export interface DebugError {
+  kind: string;
+  message: string;
+  routeIndex?: number | null;
+  legIndex?: number | null;
+  detail?: unknown;
+}
+
+export interface EngineDebugResult<
+  TSegment extends DebugSegment = DebugSegment,
+> {
+  engine: Engine;
+  status: "ok" | "partial" | "error";
+  segments: TSegment[];
+  errors: DebugError[];
+}
+
+export interface CompareDebug {
+  osrm: EngineDebugResult;
+  valhalla: EngineDebugResult;
+}
+
 /** Response of `POST /api/compare` — one envelope per engine. */
 export interface CompareResponse {
   osrm: EngineResult;
   valhalla: EngineResult;
+  /** Present only when the request opted into edge-debug extraction. */
+  debug?: CompareDebug | null;
 }
 
 // --- Frontend-owned types (not backend envelope shapes) ---------------------

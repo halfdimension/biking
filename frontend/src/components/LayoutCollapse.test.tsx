@@ -196,6 +196,25 @@ describe("Bottom panel collapse", () => {
   });
 });
 
+describe("Bottom panel resize", () => {
+  it("resizes from the keyboard and preserves the height across collapse", async () => {
+    await renderApp();
+    const handle = screen.getByRole("separator", { name: "Resize bottom panel" });
+    expect(handle).toHaveAttribute("aria-valuenow", "280");
+
+    fireEvent.keyDown(handle, { key: "ArrowUp" });
+    expect(screen.getByRole("separator", { name: "Resize bottom panel" }))
+      .toHaveAttribute("aria-valuenow", "304");
+
+    fireEvent.click(screen.getByTestId("collapse-bottom"));
+    expect(screen.queryByRole("separator", { name: "Resize bottom panel" }))
+      .not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("collapse-bottom"));
+    expect(screen.getByRole("separator", { name: "Resize bottom panel" }))
+      .toHaveAttribute("aria-valuenow", "304");
+  });
+});
+
 describe("Focus Map", () => {
   it("first click collapses all three; second click restores all-expanded", async () => {
     await renderApp();

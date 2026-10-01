@@ -76,6 +76,29 @@ async def test_call_engine_posts_json_body() -> None:
     assert b"motorcycle" in captured["content"]  # type: ignore[operator]
 
 
+async def test_call_engine_posts_protobuf_bytes_and_headers() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["content"] = request.content
+        captured["content_type"] = request.headers.get("content-type")
+        return httpx.Response(200, content=b"response")
+
+    result = await call_engine(
+        "POST",
+        f"{config.VALHALLA_BASE_URL}/route",
+        content=b"protobuf-request",
+        headers={"Content-Type": "application/x-protobuf"},
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert result.ok is True
+    assert captured == {
+        "content": b"protobuf-request",
+        "content_type": "application/x-protobuf",
+    }
+
+
 # --- Task 4.2: error classification --------------------------------------
 
 

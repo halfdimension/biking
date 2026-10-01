@@ -107,15 +107,55 @@ class EngineResult(_CamelModel):
     error: EngineError | None = None
 
 
+class DebugError(_CamelModel):
+    """A debug-extraction error that never changes the route result."""
+
+    kind: str
+    message: str
+    route_index: int | None = Field(default=None, alias="routeIndex")
+    leg_index: int | None = Field(default=None, alias="legIndex")
+    detail: Any | None = None
+
+
+class DebugSegment(_CamelModel):
+    """One engine edge/annotation segment tied to its exact route geometry."""
+
+    id: str
+    engine: Engine
+    route_id: str = Field(alias="routeId")
+    route_index: int = Field(alias="routeIndex")
+    leg_index: int = Field(alias="legIndex")
+    segment_index: int = Field(alias="segmentIndex")
+    coordinates: list[tuple[float, float]]
+    properties: dict[str, Any]
+
+
+class EngineDebugResult(_CamelModel):
+    """Independently successful, partial, or failed debug extraction."""
+
+    engine: Engine
+    status: Literal["ok", "partial", "error"]
+    segments: list[DebugSegment] = Field(default_factory=list)
+    errors: list[DebugError] = Field(default_factory=list)
+
+
+class CompareDebug(_CamelModel):
+    """Per-engine debug payload returned only when explicitly requested."""
+
+    osrm: EngineDebugResult
+    valhalla: EngineDebugResult
+
+
 class CompareResponse(_CamelModel):
     """The paired per-engine result of a Compare fan-out (Req 2, 12)."""
 
     osrm: EngineResult
     valhalla: EngineResult
+    debug: CompareDebug | None = None
 
 
 class CompareRequest(_CamelModel):
-    """Compare request body: start and destination coordinates ONLY (Req 2).
+    """Compare request body plus an opt-in edge-debug flag.
 
     The backend always builds the canonical ``Default_OSRM_Request`` and
     ``Default_Valhalla_Request`` from these coordinates. No ``osrmOptions`` /
@@ -125,6 +165,7 @@ class CompareRequest(_CamelModel):
 
     start: Coordinate
     dest: Coordinate
+    include_debug: bool = Field(default=False, alias="includeDebug")
 
 
 class OsrmRawRequest(_CamelModel):

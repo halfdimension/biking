@@ -83,8 +83,12 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
 export function compare(
   start: Coordinate,
   dest: Coordinate,
+  includeDebug = false,
 ): Promise<CompareResponse> {
-  return postJson<CompareResponse>("/api/compare", { start, dest });
+  return postJson<CompareResponse>(
+    "/api/compare",
+    includeDebug ? { start, dest, includeDebug: true } : { start, dest },
+  );
 }
 
 /** Send an exact OSRM URL verbatim through the backend (Req 9.4–9.5). */

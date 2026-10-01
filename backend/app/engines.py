@@ -109,6 +109,8 @@ async def _timed_request(
     url: str,
     *,
     json: object | None,
+    content: bytes | None,
+    headers: dict[str, str] | None,
 ) -> tuple[httpx.Response, float]:
     """Issue a single request and return ``(response, durationMs)``.
 
@@ -117,7 +119,14 @@ async def _timed_request(
     """
     start = time.perf_counter()
     if method.upper() == "POST":
-        response = await client.post(url, json=json)
+        kwargs: dict[str, object] = {}
+        if json is not None:
+            kwargs["json"] = json
+        if content is not None:
+            kwargs["content"] = content
+        if headers is not None:
+            kwargs["headers"] = headers
+        response = await client.post(url, **kwargs)
     else:
         response = await client.get(url)
     duration_ms = (time.perf_counter() - start) * 1000.0
@@ -129,6 +138,8 @@ async def request_engine(
     url: str,
     *,
     json: object | None = None,
+    content: bytes | None = None,
+    headers: dict[str, str] | None = None,
     timeout: float | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> tuple[httpx.Response, float]:
@@ -167,7 +178,14 @@ async def request_engine(
     async with httpx.AsyncClient(
         timeout=effective_timeout, transport=transport
     ) as client:
-        return await _timed_request(client, method, url, json=json)
+        return await _timed_request(
+            client,
+            method,
+            url,
+            json=json,
+            content=content,
+            headers=headers,
+        )
 
 
 async def call_engine(
@@ -175,6 +193,8 @@ async def call_engine(
     url: str,
     *,
     json: object | None = None,
+    content: bytes | None = None,
+    headers: dict[str, str] | None = None,
     timeout: float | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> EngineCallResult:
@@ -200,7 +220,13 @@ async def call_engine(
     """
     try:
         response, duration_ms = await request_engine(
-            method, url, json=json, timeout=timeout, transport=transport
+            method,
+            url,
+            json=json,
+            content=content,
+            headers=headers,
+            timeout=timeout,
+            transport=transport,
         )
     except HostNotAllowedError as exc:
         # Refused before any request — surface as an invalid_request error.

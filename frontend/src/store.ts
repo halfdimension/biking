@@ -21,6 +21,7 @@ import {
   saveTestCases,
 } from "./persistence";
 import type {
+  CompareDebug,
   CompareResponse,
   Coordinate,
   Engine,
@@ -87,6 +88,19 @@ export interface AppState {
   // Results (Req 2, 12)
   results: CompareResponse | null;
   routes: NormalizedRoute[];
+  /** Debug payload matching the currently rendered route result, if requested. */
+  debugResults: CompareDebug | null;
+
+  // Edge-debug interaction state. Segment objects stay in debugResults; these
+  // arrays contain only stable ids so pointer movement remains lightweight.
+  edgeDebugEnabled: boolean;
+  hoveredDebugSegmentIds: string[];
+  /** Geographic point under the live debug hover, in MapLibre [lon, lat] order. */
+  hoveredDebugPoint: [number, number] | null;
+  pinnedDebugSegmentIds: string[];
+  /** Geographic point captured when the current segment set was pinned. */
+  pinnedDebugPoint: [number, number] | null;
+  debugInspectorPinned: boolean;
 
   // Advanced/raw request results (Req 9.4–9.7). Isolated from Normal-mode
   // `results` / `compareStatus` so a raw send never affects a Normal Compare
@@ -180,6 +194,14 @@ export interface AppState {
   setValhallaBodyDraft: (body: string) => void;
 
   runCompare: () => Promise<void>;
+  setEdgeDebugEnabled: (enabled: boolean) => void;
+  setHoveredDebugSegmentIds: (
+    ids: string[],
+    point?: [number, number] | null,
+  ) => void;
+  pinHoveredDebugSegments: () => void;
+  unpinDebugInspector: () => void;
+  clearDebugInteraction: () => void;
 
   /** Send an exact OSRM URL verbatim through the raw path (Req 9.4, 9.5). */
   sendOsrmRaw: (url: string) => Promise<void>;
@@ -308,7 +330,18 @@ export function flattenRoutes(results: CompareResponse): NormalizedRoute[] {
 function applyRawRoutes(
   state: AppState,
   result: EngineResult,
-): Pick<AppState, "routes" | "visibility" | "selectedRouteId"> {
+): Pick<
+  AppState,
+  | "routes"
+  | "visibility"
+  | "selectedRouteId"
+  | "debugResults"
+  | "hoveredDebugSegmentIds"
+  | "hoveredDebugPoint"
+  | "pinnedDebugSegmentIds"
+  | "pinnedDebugPoint"
+  | "debugInspectorPinned"
+> {
   const routes = result.normalizedRoutes;
   const visibility = buildVisibility(routes, () => true);
   const prevSelected = state.selectedRouteId;
@@ -316,7 +349,17 @@ function applyRawRoutes(
     prevSelected && routes.some((r) => r.id === prevSelected)
       ? prevSelected
       : null;
-  return { routes, visibility, selectedRouteId };
+  return {
+    routes,
+    visibility,
+    selectedRouteId,
+    debugResults: null,
+    hoveredDebugSegmentIds: [],
+    hoveredDebugPoint: null,
+    pinnedDebugSegmentIds: [],
+    pinnedDebugPoint: null,
+    debugInspectorPinned: false,
+  };
 }
 
 /**
@@ -452,6 +495,13 @@ export const useStore = create<AppState>((set, get) => ({
 
   results: null,
   routes: [],
+  debugResults: null,
+  edgeDebugEnabled: false,
+  hoveredDebugSegmentIds: [],
+  hoveredDebugPoint: null,
+  pinnedDebugSegmentIds: [],
+  pinnedDebugPoint: null,
+  debugInspectorPinned: false,
 
   osrmRawState: IDLE_RAW,
   valhallaRawState: IDLE_RAW,
@@ -500,7 +550,16 @@ export const useStore = create<AppState>((set, get) => ({
   setValhallaBodyDraft: (body) => set({ valhallaBodyDraft: body }),
 
   runCompare: async () => {
-    const { start, dest } = get();
+    const { start, dest, edgeDebugEnabled } = get();
+    // A result-bound segment id must never survive into a new comparison.
+    set({
+      debugResults: null,
+      hoveredDebugSegmentIds: [],
+      hoveredDebugPoint: null,
+      pinnedDebugSegmentIds: [],
+      pinnedDebugPoint: null,
+      debugInspectorPinned: false,
+    });
     if (!start || !dest) {
       set({
         compareStatus: "error",
@@ -510,7 +569,9 @@ export const useStore = create<AppState>((set, get) => ({
     }
     set({ compareStatus: "loading", lastError: null });
     try {
-      const results = await api.compare(start, dest);
+      const results = edgeDebugEnabled
+        ? await api.compare(start, dest, true)
+        : await api.compare(start, dest);
       const routes = flattenRoutes(results);
       // Initialize visibility to all-visible for the returned routes only.
       const visibility = buildVisibility(routes, () => true);
@@ -525,6 +586,7 @@ export const useStore = create<AppState>((set, get) => ({
         routes,
         visibility,
         selectedRouteId,
+        debugResults: edgeDebugEnabled ? (results.debug ?? null) : null,
         compareStatus: "done",
         lastError: null,
       });
@@ -535,6 +597,62 @@ export const useStore = create<AppState>((set, get) => ({
       });
     }
   },
+
+  setEdgeDebugEnabled: (enabled) => {
+    set({
+      edgeDebugEnabled: enabled,
+      hoveredDebugSegmentIds: [],
+      hoveredDebugPoint: null,
+      pinnedDebugSegmentIds: [],
+      pinnedDebugPoint: null,
+      debugInspectorPinned: false,
+    });
+  },
+
+  setHoveredDebugSegmentIds: (ids, point = null) => {
+    const state = get();
+    const previous = state.hoveredDebugSegmentIds;
+    if (
+      previous.length === ids.length &&
+      previous.every((id, index) => id === ids[index]) &&
+      state.hoveredDebugPoint?.[0] === point?.[0] &&
+      state.hoveredDebugPoint?.[1] === point?.[1]
+    ) {
+      return;
+    }
+    set({
+      hoveredDebugSegmentIds: ids,
+      hoveredDebugPoint: ids.length ? point : null,
+    });
+  },
+
+  pinHoveredDebugSegments: () => {
+    const state = get();
+    const ids = state.hoveredDebugSegmentIds;
+    if (ids.length === 0) return;
+    set({
+      pinnedDebugSegmentIds: [...ids],
+      pinnedDebugPoint: state.hoveredDebugPoint,
+      debugInspectorPinned: true,
+      bottomCollapsed: false,
+    });
+  },
+
+  unpinDebugInspector: () =>
+    set({
+      pinnedDebugSegmentIds: [],
+      pinnedDebugPoint: null,
+      debugInspectorPinned: false,
+    }),
+
+  clearDebugInteraction: () =>
+    set({
+      hoveredDebugSegmentIds: [],
+      hoveredDebugPoint: null,
+      pinnedDebugSegmentIds: [],
+      pinnedDebugPoint: null,
+      debugInspectorPinned: false,
+    }),
 
   sendOsrmRaw: async (url) => {
     set({ osrmRawState: { status: "loading", result: null, error: null } });

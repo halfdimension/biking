@@ -50,6 +50,22 @@ describe("api client", () => {
     expect(result).toEqual(responseBody);
   });
 
+  it("adds includeDebug only when explicitly enabled", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => makeCompareResponse(),
+    } as unknown as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const start = { lat: 12.9, lon: 77.6 };
+    const dest = { lat: 12.95, lon: 77.65 };
+    await compare(start, dest, true);
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(init.body)).toEqual({ start, dest, includeDebug: true });
+  });
+
   it("compare throws with the response detail on non-2xx", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,

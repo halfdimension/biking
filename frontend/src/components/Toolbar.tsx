@@ -44,6 +44,8 @@ export default function Toolbar() {
   const compareStatus = useStore((s) => s.compareStatus);
   const lastError = useStore((s) => s.lastError);
   const health = useStore((s) => s.health);
+  const edgeDebugEnabled = useStore((s) => s.edgeDebugEnabled);
+  const setEdgeDebugEnabled = useStore((s) => s.setEdgeDebugEnabled);
 
   const isLoading = compareStatus === "loading";
 
@@ -60,6 +62,15 @@ export default function Toolbar() {
         disabled={isLoading}
       >
         {isLoading ? "Comparing…" : "Compare Routes"}
+      </button>
+
+      <button
+        type="button"
+        className={`toolbar__debug-btn${edgeDebugEnabled ? " toolbar__debug-btn--active" : ""}`}
+        aria-pressed={edgeDebugEnabled}
+        onClick={() => setEdgeDebugEnabled(!edgeDebugEnabled)}
+      >
+        Edge Debug: {edgeDebugEnabled ? "ON" : "OFF"}
       </button>
 
       {/* Manual re-frame control (Req 20.2). Uses the same fit routine as the

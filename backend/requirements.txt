@@ -4,3 +4,4 @@ httpx
 hypothesis
 pytest
 pytest-asyncio
+protobuf==3.20.3

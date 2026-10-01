@@ -149,3 +149,43 @@ export function selectedLayerSpec() {
     },
   };
 }
+
+export const DEBUG_HIGHLIGHT_LAYER_ID = "route-debug-highlight";
+export const DEBUG_HIT_LAYER_ID = "route-debug-hit";
+
+/**
+ * A subtle overlay for the exact hovered/pinned segments. It never changes the
+ * normal route source or its colors and is driven only by debug feature-state.
+ */
+export function debugHighlightLayerSpec(sourceId: string) {
+  const hovered = ["boolean", ["feature-state", "hovered"], false] as const;
+  const pinned = ["boolean", ["feature-state", "pinned"], false] as const;
+  const visible = ["any", hovered, pinned] as const;
+  return {
+    id: DEBUG_HIGHLIGHT_LAYER_ID,
+    type: "line" as const,
+    source: sourceId,
+    layout: { "line-cap": "round" as const, "line-join": "round" as const },
+    paint: {
+      "line-color": ["case", pinned, "#f59e0b", "#ffffff"],
+      "line-width": ["case", pinned, 9, hovered, 8, 0],
+      "line-opacity": ["case", pinned, 0.72, hovered, 0.52, 0],
+      "line-blur": ["case", visible, 0.4, 0],
+    },
+  };
+}
+
+/** Transparent debug-only line used for the 6px-box mouse hit test. */
+export function debugHitLayerSpec(sourceId: string) {
+  return {
+    id: DEBUG_HIT_LAYER_ID,
+    type: "line" as const,
+    source: sourceId,
+    layout: { "line-cap": "round" as const, "line-join": "round" as const },
+    paint: {
+      "line-color": "#000000",
+      "line-opacity": 0,
+      "line-width": 8,
+    },
+  };
+}

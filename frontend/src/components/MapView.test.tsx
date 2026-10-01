@@ -8,10 +8,10 @@
  * checkpoint.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, act } from "@testing-library/react";
+import { render, act, fireEvent, screen } from "@testing-library/react";
 import MapView from "./MapView";
 import { useStore } from "../store";
-import type { NormalizedRoute } from "../types";
+import type { CompareDebug, NormalizedRoute } from "../types";
 
 // A single shared mock map instance so tests can inspect the calls MapView
 // makes. getSource returns undefined until addSource is called, then a stub
@@ -213,6 +213,50 @@ describe("MapView route rendering (Task 16)", () => {
       { visible: true, selected: true, hasSelection: true },
     );
     expect(setDataSpy).not.toHaveBeenCalled();
+  });
+
+  it("updates an existing debug source while the style is settling", () => {
+    useStore.setState({
+      edgeDebugEnabled: true,
+      debugResults: null,
+      visibility: { "osrm:0": true },
+    });
+    render(<MapView />);
+    setDataSpy.mockClear();
+    styleLoaded = false;
+
+    const debug = {
+      osrm: {
+        engine: "osrm",
+        status: "ok",
+        errors: [],
+        segments: [{
+          id: "osrm:0:0:0",
+          engine: "osrm",
+          routeId: "osrm:0",
+          routeIndex: 0,
+          legIndex: 0,
+          segmentIndex: 0,
+          coordinates: [[77.2, 28.6], [77.21, 28.61]],
+          properties: {},
+        }],
+      },
+      valhalla: { engine: "valhalla", status: "ok", errors: [], segments: [] },
+    } as unknown as CompareDebug;
+
+    act(() => useStore.setState({ debugResults: debug }));
+
+    expect(setDataSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        features: [
+          expect.objectContaining({
+            properties: expect.objectContaining({ routeId: "osrm:0" }),
+          }),
+        ],
+      }),
+    );
+    act(() => useStore.getState().setEdgeDebugEnabled(false));
+    styleLoaded = true;
   });
 });
 
@@ -441,5 +485,24 @@ describe("MapView initial view (Task 13.1, Req 20.5)", () => {
     // view stands.
     expect(lastMap().fitBounds).not.toHaveBeenCalled();
     expect(lastMap().easeTo).not.toHaveBeenCalled();
+  });
+
+  it("toggles a real pitched camera view and restores 2D", () => {
+    render(<MapView />);
+    const map = lastMap();
+
+    fireEvent.click(screen.getByRole("button", { name: "Tilt map" }));
+    expect(map.easeTo).toHaveBeenLastCalledWith(
+      expect.objectContaining({ pitch: 48, bearing: -18 }),
+    );
+    expect(screen.getByRole("button", { name: "2D view" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "2D view" }));
+    expect(map.easeTo).toHaveBeenLastCalledWith(
+      expect.objectContaining({ pitch: 0, bearing: 0 }),
+    );
   });
 });
