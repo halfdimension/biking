@@ -30,6 +30,7 @@ import type {
   NormalizedRoute,
   RouteQuality,
   TestCase,
+  ValhallaTraceResult,
 } from "./types";
 
 export type AppMode = "normal" | "advanced";
@@ -37,6 +38,7 @@ export type MapClickTarget = "start" | "dest" | null;
 export type CompareStatus = "idle" | "loading" | "done" | "error";
 export type RawStatus = "idle" | "loading" | "done" | "error";
 
+export type TraceStatus = "idle" | "loading" | "done" | "error";
 /**
  * The lifecycle of a single Advanced/raw request send (Req 9.4–9.7). Kept in a
  * dedicated slice per engine so a raw-request failure never mislabels a
@@ -101,6 +103,21 @@ export interface AppState {
   /** Geographic point captured when the current segment set was pinned. */
   pinnedDebugPoint: [number, number] | null;
   debugInspectorPinned: boolean;
+
+  // Trace Inspector state is independent from the comparison map interaction.
+  traceSourceRouteId: string | null;
+  traceSourceEncodedPolyline: string | null;
+  traceStatus: TraceStatus;
+  traceResult: ValhallaTraceResult | null;
+  traceError: string | null;
+  traceHoveredSegmentIds: string[];
+  traceHoveredPoint: [number, number] | null;
+  tracePinnedSegmentIds: string[];
+  tracePinnedPoint: [number, number] | null;
+  traceInspectorPinned: boolean;
+  traceDetailsCollapsed: boolean;
+  traceDetailsExpandedHeight: number;
+  traceFitRequestId: number;
 
   // Advanced/raw request results (Req 9.4–9.7). Isolated from Normal-mode
   // `results` / `compareStatus` so a raw send never affects a Normal Compare
@@ -202,6 +219,18 @@ export interface AppState {
   pinHoveredDebugSegments: () => void;
   unpinDebugInspector: () => void;
   clearDebugInteraction: () => void;
+
+  setTraceSourceRouteId: (routeId: string) => void;
+  runValhallaTrace: () => Promise<void>;
+  setTraceHoveredSegmentIds: (
+    ids: string[],
+    point?: [number, number] | null,
+  ) => void;
+  pinTraceHoveredSegments: () => void;
+  clearTracePin: () => void;
+  toggleTraceDetailsCollapsed: () => void;
+  setTraceDetailsExpandedHeight: (height: number) => void;
+  requestTraceFit: () => void;
 
   /** Send an exact OSRM URL verbatim through the raw path (Req 9.4, 9.5). */
   sendOsrmRaw: (url: string) => Promise<void>;
@@ -314,6 +343,15 @@ export function flattenRoutes(results: CompareResponse): NormalizedRoute[] {
     ...results.osrm.normalizedRoutes,
     ...results.valhalla.normalizedRoutes,
   ];
+}
+
+/** Return the original preserved OSRM polyline6 for a normalized route. */
+export function encodedPolylineForRoute(route: NormalizedRoute | undefined): string | null {
+  if (!route || route.engine !== "osrm" || !route.raw || typeof route.raw !== "object") {
+    return null;
+  }
+  const geometry = (route.raw as { geometry?: unknown }).geometry;
+  return typeof geometry === "string" && geometry.length > 0 ? geometry : null;
 }
 
 /**
@@ -503,6 +541,20 @@ export const useStore = create<AppState>((set, get) => ({
   pinnedDebugPoint: null,
   debugInspectorPinned: false,
 
+  traceSourceRouteId: null,
+  traceSourceEncodedPolyline: null,
+  traceStatus: "idle",
+  traceResult: null,
+  traceError: null,
+  traceHoveredSegmentIds: [],
+  traceHoveredPoint: null,
+  tracePinnedSegmentIds: [],
+  tracePinnedPoint: null,
+  traceInspectorPinned: false,
+  traceDetailsCollapsed: false,
+  traceDetailsExpandedHeight: 180,
+  traceFitRequestId: 0,
+
   osrmRawState: IDLE_RAW,
   valhallaRawState: IDLE_RAW,
 
@@ -575,12 +627,23 @@ export const useStore = create<AppState>((set, get) => ({
       const routes = flattenRoutes(results);
       // Initialize visibility to all-visible for the returned routes only.
       const visibility = buildVisibility(routes, () => true);
-      // Keep the current selection only if it is still present.
-      const prevSelected = get().selectedRouteId;
+      // Keep normal-map selection and trace selection independently.
+      const previous = get();
+      const prevSelected = previous.selectedRouteId;
       const selectedRouteId =
         prevSelected && routes.some((r) => r.id === prevSelected)
           ? prevSelected
           : null;
+      const osrmRoutes = results.osrm.normalizedRoutes;
+      const selectedTraceRoute =
+        osrmRoutes.find((route) => route.id === previous.traceSourceRouteId) ??
+        osrmRoutes[0];
+      const nextTraceSourceId = selectedTraceRoute?.id ?? null;
+      const nextTraceEncoded = encodedPolylineForRoute(selectedTraceRoute);
+      const keepTrace =
+        previous.traceResult !== null &&
+        previous.traceResult.sourceRouteId === nextTraceSourceId &&
+        previous.traceSourceEncodedPolyline === nextTraceEncoded;
       set({
         results,
         routes,
@@ -589,6 +652,20 @@ export const useStore = create<AppState>((set, get) => ({
         debugResults: edgeDebugEnabled ? (results.debug ?? null) : null,
         compareStatus: "done",
         lastError: null,
+        traceSourceRouteId: nextTraceSourceId,
+        ...(keepTrace
+          ? {}
+          : {
+              traceSourceEncodedPolyline: null,
+              traceStatus: "idle" as const,
+              traceResult: null,
+              traceError: null,
+              traceHoveredSegmentIds: [],
+              traceHoveredPoint: null,
+              tracePinnedSegmentIds: [],
+              tracePinnedPoint: null,
+              traceInspectorPinned: false,
+            }),
       });
     } catch (err) {
       set({
@@ -653,6 +730,122 @@ export const useStore = create<AppState>((set, get) => ({
       pinnedDebugPoint: null,
       debugInspectorPinned: false,
     }),
+
+  setTraceSourceRouteId: (routeId) => {
+    if (get().traceSourceRouteId === routeId) return;
+    set({
+      traceSourceRouteId: routeId,
+      traceSourceEncodedPolyline: null,
+      traceStatus: "idle",
+      traceResult: null,
+      traceError: null,
+      traceHoveredSegmentIds: [],
+      traceHoveredPoint: null,
+      tracePinnedSegmentIds: [],
+      tracePinnedPoint: null,
+      traceInspectorPinned: false,
+    });
+  },
+
+  runValhallaTrace: async () => {
+    const state = get();
+    const route = state.results?.osrm.normalizedRoutes.find(
+      (candidate) => candidate.id === state.traceSourceRouteId,
+    );
+    const encodedPolyline = encodedPolylineForRoute(route);
+    if (!route || !encodedPolyline) {
+      set({
+        traceStatus: "error",
+        traceError: route
+          ? "The selected OSRM route has no preserved polyline6 geometry."
+          : "Run a route comparison first.",
+        traceResult: null,
+      });
+      return;
+    }
+    set({
+      traceStatus: "loading",
+      traceError: null,
+      traceResult: null,
+      traceSourceEncodedPolyline: encodedPolyline,
+      traceHoveredSegmentIds: [],
+      traceHoveredPoint: null,
+      tracePinnedSegmentIds: [],
+      tracePinnedPoint: null,
+      traceInspectorPinned: false,
+    });
+    try {
+      const result = await api.valhallaTrace(route.id, encodedPolyline);
+      // A source change while the request was in flight invalidates the response.
+      if (
+        get().traceSourceRouteId !== route.id ||
+        get().traceSourceEncodedPolyline !== encodedPolyline
+      ) {
+        return;
+      }
+      const failed = result.status === "error";
+      set({
+        traceStatus: failed ? "error" : "done",
+        traceResult: result,
+        traceError: failed
+          ? (result.errors[0]?.message ?? "Valhalla trace failed.")
+          : null,
+      });
+    } catch (err) {
+      if (get().traceSourceRouteId !== route.id) return;
+      set({
+        traceStatus: "error",
+        traceResult: null,
+        traceError: err instanceof Error ? err.message : String(err),
+      });
+    }
+  },
+
+  setTraceHoveredSegmentIds: (ids, point = null) => {
+    const state = get();
+    const previous = state.traceHoveredSegmentIds;
+    if (
+      previous.length === ids.length &&
+      previous.every((id, index) => id === ids[index]) &&
+      state.traceHoveredPoint?.[0] === point?.[0] &&
+      state.traceHoveredPoint?.[1] === point?.[1]
+    ) {
+      return;
+    }
+    set({
+      traceHoveredSegmentIds: ids,
+      traceHoveredPoint: ids.length ? point : null,
+    });
+  },
+
+  pinTraceHoveredSegments: () => {
+    const state = get();
+    if (state.traceHoveredSegmentIds.length === 0) return;
+    set({
+      tracePinnedSegmentIds: [...state.traceHoveredSegmentIds],
+      tracePinnedPoint: state.traceHoveredPoint,
+      traceInspectorPinned: true,
+      traceDetailsCollapsed: false,
+    });
+  },
+
+  clearTracePin: () =>
+    set({
+      tracePinnedSegmentIds: [],
+      tracePinnedPoint: null,
+      traceInspectorPinned: false,
+    }),
+
+  toggleTraceDetailsCollapsed: () =>
+    set((state) => ({
+      traceDetailsCollapsed: !state.traceDetailsCollapsed,
+    })),
+
+  setTraceDetailsExpandedHeight: (height) =>
+    set({ traceDetailsExpandedHeight: height }),
+
+  requestTraceFit: () =>
+    set((state) => ({ traceFitRequestId: state.traceFitRequestId + 1 })),
 
   sendOsrmRaw: async (url) => {
     set({ osrmRawState: { status: "loading", result: null, error: null } });

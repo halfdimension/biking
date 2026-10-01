@@ -15,6 +15,7 @@ import type {
   Engine,
   EngineHealth,
   EngineResult,
+  ValhallaTraceResult,
 } from "./types";
 
 const DEFAULT_BASE_URL = "http://localhost:8000";
@@ -73,6 +74,18 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
     throw new Error(await extractErrorMessage(res));
   }
   return (await res.json()) as T;
+}
+
+/** Map-match a preserved OSRM polyline through Valhalla trace_attributes. */
+export function valhallaTrace(
+  routeId: string,
+  encodedPolyline: string,
+): Promise<ValhallaTraceResult> {
+  return postJson<ValhallaTraceResult>("/api/trace/valhalla", {
+    routeId,
+    encodedPolyline,
+    costing: "motorcycle",
+  });
 }
 
 /**

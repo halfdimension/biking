@@ -168,6 +168,40 @@ class CompareRequest(_CamelModel):
     include_debug: bool = Field(default=False, alias="includeDebug")
 
 
+class ValhallaTraceRequest(_CamelModel):
+    """An OSRM route geometry to map-match with Valhalla."""
+
+    route_id: str = Field(alias="routeId", min_length=1)
+    encoded_polyline: str = Field(alias="encodedPolyline", min_length=1)
+    costing: Literal["motorcycle"] = "motorcycle"
+
+
+class TraceWarning(_CamelModel):
+    """A non-fatal condition in an otherwise usable trace result."""
+
+    kind: str
+    message: str
+    detail: Any | None = None
+
+
+class ValhallaTraceResponse(_CamelModel):
+    """Independent result envelope for trace inspection."""
+
+    status: Literal["ok", "partial", "error"]
+    source_route_id: str = Field(alias="sourceRouteId")
+    original_geometry: list[tuple[float, float]] = Field(alias="originalGeometry")
+    trace_geometry: list[tuple[float, float]] = Field(alias="traceGeometry")
+    exact_geometry_match: bool = Field(alias="exactGeometryMatch")
+    original_point_count: int = Field(alias="originalPointCount")
+    trace_point_count: int = Field(alias="tracePointCount")
+    geometry_deviation: Any | None = Field(default=None, alias="geometryDeviation")
+    segments: list[DebugSegment] = Field(default_factory=list)
+    warnings: list[TraceWarning] = Field(default_factory=list)
+    errors: list[DebugError] = Field(default_factory=list)
+    http_status: int | None = Field(default=None, alias="httpStatus")
+    duration_ms: float = Field(default=0.0, alias="durationMs")
+
+
 class OsrmRawRequest(_CamelModel):
     """Advanced-mode OSRM raw request: the exact URL to GET verbatim (Req 9.4)."""
 

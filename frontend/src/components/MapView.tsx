@@ -31,7 +31,10 @@ import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useStore } from "../store";
 import EdgeDebugInspector from "./EdgeDebugInspector";
-import { resolveMapStyle } from "../map/style";
+import {
+  attachDashboardMapLifecycle,
+  dashboardMapOptions,
+} from "../map/initialize";
 import { buildRoutesFeatureCollection } from "../map/routes";
 import {
   buildDebugSegmentsFeatureCollection,
@@ -58,10 +61,6 @@ import {
   markerCoords,
 } from "../map/fit";
 import type { Coordinate, NormalizedRoute } from "../types";
-
-/** Delhi NCR default center as `[lng, lat]` (MapLibre convention) (Req 20.5). */
-const DELHI_NCR_CENTER: [number, number] = [77.209, 28.6139];
-const DEFAULT_ZOOM = 10;
 
 /** Distinct marker colors (Req 1.7): green start, red destination. */
 const START_COLOR = "#16a34a";
@@ -263,12 +262,7 @@ export default function MapView() {
     const container = containerRef.current;
     if (!container) return;
 
-    const map = new maplibregl.Map({
-      container,
-      style: resolveMapStyle(),
-      center: DELHI_NCR_CENTER,
-      zoom: DEFAULT_ZOOM,
-    });
+    const map = new maplibregl.Map(dashboardMapOptions(container));
     mapRef.current = map;
 
     // Dev/diagnostic hook: expose the live map instance so a headless browser
@@ -282,40 +276,11 @@ export default function MapView() {
     // Trivial, keyless navigation controls.
     map.addControl(new maplibregl.NavigationControl(), "top-right");
 
-    // Resize the map to its container's real size. Guarded so a resize queued
-    // for a stale map (e.g. after a StrictMode mount→cleanup→mount cycle) is a
-    // no-op rather than acting on a removed instance.
-    const doResize = () => {
-      if (mapRef.current === map) map.resize();
-    };
-
-    // Temporary runtime diagnostics so a blank map is never silent.
-    const handleMapError = (e: unknown) => {
-      const err = (e && (e as { error?: unknown }).error) || e;
-      console.error("[MapView] MapLibre error:", err);
-    };
-    const handleLoad = () => {
-      const canvas = map.getCanvas();
-      console.info(
-        "[MapView] map load; canvas:",
-        canvas.width,
-        "x",
-        canvas.height,
-      );
-      doResize();
-    };
-
-    map.on("error", handleMapError);
-    map.on("load", handleLoad);
-    map.on("style.load", doResize);
-
-    // Resize once on the next frame, after the browser has laid the flex
-    // container out to its final size.
-    const rafId = requestAnimationFrame(doResize);
-
-    // Track the container's real size as sidebars/tabs affect the layout.
-    const resizeObserver = new ResizeObserver(() => doResize());
-    resizeObserver.observe(container);
+    const detachMapLifecycle = attachDashboardMapLifecycle(
+      map,
+      container,
+      "MapView",
+    );
 
     let debugMoveFrame: number | null = null;
 
@@ -401,16 +366,12 @@ export default function MapView() {
     map.on("contextmenu", handleContextMenu);
 
     return () => {
-      cancelAnimationFrame(rafId);
+      detachMapLifecycle();
       if (debugMoveFrame !== null) cancelAnimationFrame(debugMoveFrame);
-      resizeObserver.disconnect();
       map.off("mousemove", handleMouseMove);
       map.off("mouseleave", handleMouseLeave);
       map.off("click", handleClick);
       map.off("contextmenu", handleContextMenu);
-      map.off("error", handleMapError);
-      map.off("load", handleLoad);
-      map.off("style.load", doResize);
       map.remove();
       mapRef.current = null;
       startMarkerRef.current = null;

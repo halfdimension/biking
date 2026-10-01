@@ -174,4 +174,17 @@ describe("App layout shell", () => {
       /run Compare to assess routes/i,
     );
   });
+
+  it("switches to Trace Inspector and back without a page reload", async () => {
+    await renderApp();
+    const navigation = screen.getByRole("navigation", { name: "Dashboard screens" });
+
+    fireEvent.click(within(navigation).getByRole("button", { name: "Trace Inspector" }));
+    expect(screen.getByRole("main", { name: "Trace Inspector" })).toBeInTheDocument();
+    expect(screen.getByText("Run a route comparison first.")).toBeInTheDocument();
+    expect(screen.queryByTestId("map-view")).not.toBeInTheDocument();
+
+    fireEvent.click(within(navigation).getByRole("button", { name: "Route Comparison" }));
+    expect(screen.getByTestId("map-view")).toBeInTheDocument();
+  });
 });

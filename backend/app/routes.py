@@ -33,6 +33,8 @@ from app.models import (
     HealthResponse,
     OsrmRawRequest,
     ValhallaRawRequest,
+    ValhallaTraceRequest,
+    ValhallaTraceResponse,
 )
 from app.osrm import build_default_osrm_url, build_osrm_debug, normalize_osrm_response
 from app.valhalla import build_default_valhalla_body, normalize_valhalla_response
@@ -41,6 +43,11 @@ from app.valhalla_pbf import (
     build_valhalla_pbf_request,
     normalize_valhalla_pbf_response,
     parse_valhalla_pbf,
+)
+from app.trace import (
+    build_trace_attributes_body,
+    normalize_trace_attributes_response,
+    trace_error_response,
 )
 
 router = APIRouter(prefix="/api")
@@ -84,6 +91,42 @@ def _decode_json(result: EngineCallResult) -> tuple[Any, bool]:
         return response.json(), True
     except (ValueError, TypeError):
         return None, False
+
+
+@router.post("/trace/valhalla", response_model=ValhallaTraceResponse)
+async def trace_valhalla(request: ValhallaTraceRequest) -> ValhallaTraceResponse:
+    """Map-match one preserved OSRM polyline through Valhalla trace_attributes."""
+    url = f"{config.VALHALLA_BASE_URL}/trace_attributes"
+    payload = build_trace_attributes_body(request.encoded_polyline, request.costing)
+    result = await call_engine("POST", url, json=payload)
+    if not result.ok:
+        error = result.error
+        return trace_error_response(
+            route_id=request.route_id,
+            encoded_polyline=request.encoded_polyline,
+            kind=error.kind if error else "trace_failed",
+            message=error.message if error else "Valhalla trace request failed.",
+            detail=error.detail if error else None,
+            http_status=result.http_status,
+            duration_ms=result.duration_ms,
+        )
+    body, decoded = _decode_json(result)
+    if not decoded:
+        return trace_error_response(
+            route_id=request.route_id,
+            encoded_polyline=request.encoded_polyline,
+            kind="invalid_response",
+            message="Valhalla returned a non-JSON trace response.",
+            http_status=result.http_status,
+            duration_ms=result.duration_ms,
+        )
+    return normalize_trace_attributes_response(
+        body,
+        route_id=request.route_id,
+        encoded_polyline=request.encoded_polyline,
+        duration_ms=result.duration_ms,
+        http_status=result.http_status,
+    )
 
 
 def _error_envelope(engine: str, result: EngineCallResult) -> EngineResult:

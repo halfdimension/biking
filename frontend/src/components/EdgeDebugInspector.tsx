@@ -73,15 +73,17 @@ function OsrmSummary({
 function ValhallaSummary({
   segment,
   label,
+  heading,
 }: {
   segment: ValhallaDebugSegment;
   label: string;
+  heading?: string;
 }) {
   const p = segment.properties;
   return (
     <section className="edge-hover__section" data-testid="edge-hover-valhalla">
       <div className="edge-hover__heading">
-        <strong>VALHALLA</strong>
+        <strong>{heading ?? "VALHALLA"}</strong>
         <span>{label}</span>
         <b>#{segment.segmentIndex}</b>
       </div>
@@ -100,13 +102,26 @@ function ValhallaSummary({
   );
 }
 
-/** Compact, hover-only map card. Long-form data lives in the Edge Details tab. */
-export default function EdgeDebugInspector() {
-  const enabled = useStore((state) => state.edgeDebugEnabled);
-  const debug = useStore((state) => state.debugResults);
+export interface EdgeDebugInspectorProps {
+  enabled?: boolean;
+  debug?: import("../types").CompareDebug | null;
+  routeLabels?: Record<string, string>;
+  visibility?: Record<string, boolean>;
+  hoveredIds?: string[];
+  valhallaHeading?: string;
+}
+
+/** Compact hover card shared by comparison and trace maps. */
+export default function EdgeDebugInspector(props: EdgeDebugInspectorProps = {}) {
+  const storeEnabled = useStore((state) => state.edgeDebugEnabled);
+  const storeDebug = useStore((state) => state.debugResults);
   const routes = useStore((state) => state.routes);
-  const visibility = useStore((state) => state.visibility);
-  const hoveredIds = useStore((state) => state.hoveredDebugSegmentIds);
+  const storeVisibility = useStore((state) => state.visibility);
+  const storeHoveredIds = useStore((state) => state.hoveredDebugSegmentIds);
+  const enabled = props.enabled ?? storeEnabled;
+  const debug = props.debug === undefined ? storeDebug : props.debug;
+  const visibility = props.visibility ?? storeVisibility;
+  const hoveredIds = props.hoveredIds ?? storeHoveredIds;
   const [visible, setVisible] = useState(false);
   const [displayedIds, setDisplayedIds] = useState<string[]>([]);
   const pointerOverCardRef = useRef(false);
@@ -161,8 +176,10 @@ export default function EdgeDebugInspector() {
 
   const lookup = useMemo(() => buildDebugSegmentLookup(debug), [debug]);
   const labels = useMemo(
-    () => new Map(routes.map((route) => [route.id, route.label])),
-    [routes],
+    () => props.routeLabels
+      ? new Map(Object.entries(props.routeLabels))
+      : new Map(routes.map((route) => [route.id, route.label])),
+    [props.routeLabels, routes],
   );
   const segments = displayedIds
     .map((id) => lookup.get(id))
@@ -208,6 +225,7 @@ export default function EdgeDebugInspector() {
             key={segment.id}
             segment={segment}
             label={routeLabel(segment, labels)}
+            heading={props.valhallaHeading}
           />
         ),
       )}

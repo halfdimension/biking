@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useId, useMemo } from "react";
 import { useStore } from "../store";
 import { buildDebugSegmentLookup } from "../map/debugSegments";
 import type {
@@ -245,19 +245,45 @@ function ValhallaDetails({
   );
 }
 
-export default function EdgeDetailsPanel() {
-  const debug = useStore((state) => state.debugResults);
+export interface EdgeDetailsPanelProps {
+  debug?: import("../types").CompareDebug | null;
+  routeLabels?: Record<string, string>;
+  visibility?: Record<string, boolean>;
+  pinnedIds?: string[];
+  pinned?: boolean;
+  point?: [number, number] | null;
+  onClear?: () => void;
+  title?: string;
+  collapsible?: boolean;
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
+}
+
+export default function EdgeDetailsPanel(props: EdgeDetailsPanelProps = {}) {
+  const storeDebug = useStore((state) => state.debugResults);
   const routes = useStore((state) => state.routes);
-  const visibility = useStore((state) => state.visibility);
-  const pinnedIds = useStore((state) => state.pinnedDebugSegmentIds);
-  const pinned = useStore((state) => state.debugInspectorPinned);
-  const point = useStore((state) => state.pinnedDebugPoint);
-  const clear = useStore((state) => state.unpinDebugInspector);
+  const storeVisibility = useStore((state) => state.visibility);
+  const storePinnedIds = useStore((state) => state.pinnedDebugSegmentIds);
+  const storePinned = useStore((state) => state.debugInspectorPinned);
+  const storePoint = useStore((state) => state.pinnedDebugPoint);
+  const storeClear = useStore((state) => state.unpinDebugInspector);
+  const debug = props.debug === undefined ? storeDebug : props.debug;
+  const visibility = props.visibility ?? storeVisibility;
+  const pinnedIds = props.pinnedIds ?? storePinnedIds;
+  const pinned = props.pinned ?? storePinned;
+  const point = props.point === undefined ? storePoint : props.point;
+  const clear = props.onClear ?? storeClear;
+  const collapsible = props.collapsible ?? false;
+  const collapsed = collapsible && Boolean(props.collapsed);
+  const detailsBodyId = useId();
+  const toggleCollapsed = props.onToggleCollapsed;
 
   const lookup = useMemo(() => buildDebugSegmentLookup(debug), [debug]);
   const labels = useMemo(
-    () => new Map(routes.map((route) => [route.id, route.label])),
-    [routes],
+    () => props.routeLabels
+      ? new Map(Object.entries(props.routeLabels))
+      : new Map(routes.map((route) => [route.id, route.label])),
+    [props.routeLabels, routes],
   );
   const segments = pinnedIds
     .map((id) => lookup.get(id))
@@ -285,17 +311,49 @@ export default function EdgeDetailsPanel() {
   }
 
   return (
-    <div className="edge-details">
+    <div className={"edge-details" + (collapsible ? " edge-details--drawer" : "")}>
       <div className="edge-details__toolbar">
-        <div>
-          <strong>PINNED EDGE DETAILS</strong>
-          <span>{segments.length} segment{segments.length === 1 ? "" : "s"}</span>
+        <div className="edge-details__heading">
+          <strong>{props.title ?? "PINNED EDGE DETAILS"}</strong>
+          <span className="edge-details__count">
+            {segments.length} segment{segments.length === 1 ? "" : "s"}
+          </span>
         </div>
-        <button type="button" onClick={clear}>
-          Unpin / Clear Details
-        </button>
+        <div className="edge-details__toolbar-controls">
+          {collapsible ? (
+            <button
+              type="button"
+              className="edge-details__toggle"
+              data-testid="toggle-trace-details"
+              aria-expanded={!collapsed}
+              aria-controls={detailsBodyId}
+              aria-label={collapsed
+                ? "Expand pinned trace edge details"
+                : "Collapse pinned trace edge details"}
+              onClick={toggleCollapsed}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  toggleCollapsed?.();
+                }
+              }}
+            >
+              <span aria-hidden="true">{collapsed ? "▴" : "▾"}</span>
+              {collapsed ? "Expand" : "Collapse"}
+            </button>
+          ) : null}
+          <button className="edge-details__clear" type="button" onClick={clear}>
+            Unpin / Clear Details
+          </button>
+        </div>
       </div>
 
+      <div
+        id={detailsBodyId}
+        className="edge-details__body"
+        data-testid={collapsible ? "trace-edge-details-body" : undefined}
+        hidden={collapsed}
+      >
       {debug
         ? (["osrm", "valhalla"] as const).map((engine) => {
             const result = debug[engine];
@@ -311,27 +369,28 @@ export default function EdgeDetailsPanel() {
           })
         : null}
 
-      <div className="edge-details__engines">
-        {segments.map((segment) => {
-          const label =
-            labels.get(segment.routeId) ??
-            `${segment.engine.toUpperCase()} ${segment.routeIndex === 0 ? "Primary" : `Alt ${segment.routeIndex}`}`;
-          return segment.engine === "osrm" ? (
-            <OsrmDetails
-              key={segment.id}
-              segment={segment}
-              label={label}
-              point={point}
-            />
-          ) : (
-            <ValhallaDetails
-              key={segment.id}
-              segment={segment}
-              label={label}
-              point={point}
-            />
-          );
-        })}
+        <div className="edge-details__engines">
+          {segments.map((segment) => {
+            const label =
+              labels.get(segment.routeId) ??
+              `${segment.engine.toUpperCase()} ${segment.routeIndex === 0 ? "Primary" : `Alt ${segment.routeIndex}`}`;
+            return segment.engine === "osrm" ? (
+              <OsrmDetails
+                key={segment.id}
+                segment={segment}
+                label={label}
+                point={point}
+              />
+            ) : (
+              <ValhallaDetails
+                key={segment.id}
+                segment={segment}
+                label={label}
+                point={point}
+              />
+            );
+          })}
+        </div>
       </div>
     </div>
   );

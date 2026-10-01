@@ -201,6 +201,29 @@ export interface CompareResponse {
   debug?: CompareDebug | null;
 }
 
+export interface TraceWarning {
+  kind: string;
+  message: string;
+  detail?: unknown;
+}
+
+/** Independent result of map-matching one preserved OSRM route in Valhalla. */
+export interface ValhallaTraceResult {
+  status: "ok" | "partial" | "error";
+  sourceRouteId: string;
+  originalGeometry: [number, number][];
+  traceGeometry: [number, number][];
+  exactGeometryMatch: boolean;
+  originalPointCount: number;
+  tracePointCount: number;
+  geometryDeviation: unknown | null;
+  segments: ValhallaDebugSegment[];
+  warnings: TraceWarning[];
+  errors: DebugError[];
+  httpStatus: number | null;
+  durationMs: number;
+}
+
 // --- Frontend-owned types (not backend envelope shapes) ---------------------
 
 /** A saved test case, persisted to localStorage (Req 13). */
