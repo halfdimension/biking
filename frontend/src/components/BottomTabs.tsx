@@ -11,10 +11,12 @@ import ValhallaRawRequest from "./ValhallaRawRequest";
 import RawResponseInspector from "./RawResponseInspector";
 import Assessment from "./Assessment";
 import EdgeDetailsPanel from "./EdgeDetailsPanel";
+import RouteAnalysis from "./RouteAnalysis";
 
 const TABS = [
   "Comparison",
   "Edge Details",
+  "Route Analysis",
   "OSRM Raw Request",
   "OSRM Response",
   "Valhalla Raw Request",
@@ -147,6 +149,8 @@ export default function BottomTabs() {
           <ComparisonTable />
         ) : active === "Edge Details" ? (
           <EdgeDetailsPanel />
+        ) : active === "Route Analysis" ? (
+          <RouteAnalysis />
         ) : active === "OSRM Raw Request" ? (
           <OsrmRawRequest />
         ) : active === "OSRM Response" ? (
