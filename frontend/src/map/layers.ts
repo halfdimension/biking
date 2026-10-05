@@ -170,6 +170,8 @@ export function debugHitLayerSpec(sourceId: string) {
 
 export const ANALYSIS_MATCH_GLOW_LAYER_ID = "route-analysis-matches-glow";
 export const ANALYSIS_MATCH_LAYER_ID = "route-analysis-matches-line";
+export const ANALYSIS_FOCUS_GLOW_LAYER_ID = "route-analysis-focus-glow";
+export const ANALYSIS_FOCUS_LAYER_ID = "route-analysis-focus-line";
 
 /**
  * Additive Route Analysis overlay. The dark outline separates the cyan match
@@ -200,6 +202,36 @@ export function analysisMatchLayerSpec(sourceId: string) {
       "line-color": "#22d3ee",
       "line-width": 6,
       "line-opacity": 0.96,
+    },
+  };
+}
+
+/** One-edge chart focus, deliberately stronger and distinct from cyan search. */
+export function analysisFocusGlowLayerSpec(sourceId: string) {
+  return {
+    id: ANALYSIS_FOCUS_GLOW_LAYER_ID,
+    type: "line" as const,
+    source: sourceId,
+    layout: { "line-cap": "round" as const, "line-join": "round" as const },
+    paint: {
+      "line-color": "#111827",
+      "line-width": 13,
+      "line-opacity": 0.82,
+      "line-blur": 0.7,
+    },
+  };
+}
+
+export function analysisFocusLayerSpec(sourceId: string) {
+  return {
+    id: ANALYSIS_FOCUS_LAYER_ID,
+    type: "line" as const,
+    source: sourceId,
+    layout: { "line-cap": "round" as const, "line-join": "round" as const },
+    paint: {
+      "line-color": "#d9f99d",
+      "line-width": 7,
+      "line-opacity": 1,
     },
   };
 }

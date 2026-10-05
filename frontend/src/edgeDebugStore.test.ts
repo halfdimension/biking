@@ -40,6 +40,8 @@ describe("Edge Debug store", () => {
       pinnedDebugSegmentIds: [],
       pinnedDebugPoint: null,
       debugInspectorPinned: false,
+      edgeDetailsOpenRequestId: 0,
+      routeAnalysisFocusedSegmentId: null,
       compareStatus: "idle",
       lastError: null,
     });
@@ -72,6 +74,7 @@ describe("Edge Debug store", () => {
       pinnedDebugSegmentIds: ["old-pin"],
       pinnedDebugPoint: [77.2, 28.6],
       debugInspectorPinned: true,
+      routeAnalysisFocusedSegmentId: "old-focus",
     });
     await useStore.getState().runCompare();
     expect(useStore.getState().hoveredDebugSegmentIds).toEqual([]);
@@ -79,6 +82,20 @@ describe("Edge Debug store", () => {
     expect(useStore.getState().hoveredDebugPoint).toBeNull();
     expect(useStore.getState().pinnedDebugPoint).toBeNull();
     expect(useStore.getState().debugInspectorPinned).toBe(false);
+    expect(useStore.getState().routeAnalysisFocusedSegmentId).toBeNull();
+  });
+
+  it("explicit exact-ID pins replace safely and request Edge Details every time", () => {
+    useStore.getState().pinDebugSegments(["edge-a"], null);
+    const first = useStore.getState();
+    expect(first.pinnedDebugSegmentIds).toEqual(["edge-a"]);
+    expect(first.pinnedDebugPoint).toBeNull();
+    expect(first.edgeDetailsOpenRequestId).toBe(1);
+
+    useStore.getState().pinDebugSegments(["edge-b"], null);
+    const second = useStore.getState();
+    expect(second.pinnedDebugSegmentIds).toEqual(["edge-b"]);
+    expect(second.edgeDetailsOpenRequestId).toBe(2);
   });
 
   it("keeps pinned details stable while hover continues independently", () => {

@@ -564,6 +564,8 @@ describe("MapView analysis match overlay", () => {
       hoveredDebugSegmentIds: [],
       pinnedDebugSegmentIds: [],
       routeAnalysisExecutedSearch: analysisSearch(4),
+      routeAnalysisRouteId: "valhalla:0",
+      routeAnalysisFocusedSegmentId: null,
     });
   });
 
@@ -671,6 +673,158 @@ describe("MapView analysis match overlay", () => {
       { source: "route-debug-segments", id: "valhalla:0:0:0" },
       expect.objectContaining({ hovered: true }),
     );
+  });
+});
+
+describe("MapView analysis focus overlay", () => {
+  function focusSearch(): ExecutedRouteAnalysisSearch {
+    const matched = debugResult().valhalla.segments[0];
+    return {
+      comparisonResultRevision: 4,
+      routeId: "valhalla:0",
+      query: { field: "speed", operator: "=", value: "40" },
+      result: {
+        matchingSegmentIds: [matched.id],
+        matchingSegments: [{
+          debugSegmentId: matched.id,
+          engine: matched.engine,
+          routeId: matched.routeId,
+          routeIndex: matched.routeIndex,
+          legIndex: matched.legIndex,
+          segmentIndex: matched.segmentIndex,
+          startDistanceMeters: 0,
+          endDistanceMeters: 100,
+          lengthMeters: 100,
+          lengthSource: "engine",
+          segment: matched,
+        }],
+        matchedDistanceMeters: 100,
+        matchedPercentage: 100,
+        totalSegmentCount: 1,
+        matchingSegmentCount: 1,
+        missingLengthSegmentCount: 0,
+        hasIncompleteDistanceCoverage: false,
+      },
+    };
+  }
+
+  beforeEach(() => {
+    mapInstances = [];
+    unsettleStyleWhenRoutesSourceIsAdded = false;
+    debugQueryFeatures = [];
+    styleLoaded = true;
+    setDataSpy.mockClear();
+    vi.clearAllMocks();
+    useStore.setState({
+      routes: [
+        route({ id: "osrm:0" }),
+        route({ id: "valhalla:0", engine: "valhalla" }),
+      ],
+      visibility: { "osrm:0": true, "valhalla:0": true },
+      selectedRouteId: "valhalla:0",
+      start: null,
+      dest: null,
+      compareStatus: "done",
+      fitRequestId: 0,
+      comparisonResultRevision: 4,
+      routeComparisonCamera: null,
+      routeComparisonCameraResultRevision: null,
+      edgeDebugEnabled: true,
+      debugResults: debugResult(),
+      hoveredDebugSegmentIds: [],
+      pinnedDebugSegmentIds: [],
+      routeAnalysisExecutedSearch: focusSearch(),
+      routeAnalysisRouteId: "valhalla:0",
+      routeAnalysisFocusedSegmentId: "valhalla:0:0:0",
+    });
+  });
+
+  it("creates one exact feature between search and debug layers", () => {
+    render(<MapView />);
+    const map = lastMap();
+    const data = map.sourceData.get("route-analysis-focus") as {
+      features: Array<{
+        geometry: { coordinates: [number, number][] };
+        properties: Record<string, unknown>;
+      }>;
+    };
+    expect(data.features).toHaveLength(1);
+    expect(data.features[0].geometry.coordinates).toEqual(
+      debugResult().valhalla.segments[0].coordinates,
+    );
+    expect(data.features[0].properties).toEqual({
+      debugSegmentId: "valhalla:0:0:0",
+      routeId: "valhalla:0",
+      engine: "valhalla",
+      segmentIndex: 0,
+    });
+    expect(map.addLayer.mock.calls.map((call) => (call[0] as { id: string }).id))
+      .toEqual([
+        "routes-hit",
+        "routes-base",
+        "routes-selected",
+        "route-analysis-matches-glow",
+        "route-analysis-matches-line",
+        "route-analysis-focus-glow",
+        "route-analysis-focus-line",
+        "route-debug-highlight",
+        "route-debug-hit",
+      ]);
+  });
+
+  it("hides, restores, and clears focus geometry without touching search", () => {
+    render(<MapView />);
+    const map = lastMap();
+    const search = useStore.getState().routeAnalysisExecutedSearch;
+    act(() => useStore.getState().setVisibility("valhalla:0", false));
+    expect((map.sourceData.get("route-analysis-focus") as { features: unknown[] }).features)
+      .toEqual([]);
+    act(() => useStore.getState().setVisibility("valhalla:0", true));
+    expect((map.sourceData.get("route-analysis-focus") as { features: unknown[] }).features)
+      .toHaveLength(1);
+    act(() => useStore.getState().setRouteAnalysisFocusedSegmentId(null));
+    expect((map.sourceData.get("route-analysis-focus") as { features: unknown[] }).features)
+      .toEqual([]);
+    expect(useStore.getState().routeAnalysisExecutedSearch).toBe(search);
+  });
+
+  it("does not create a focus source before an edge is focused", () => {
+    useStore.setState({ routeAnalysisFocusedSegmentId: null });
+    render(<MapView />);
+    expect(lastMap().getSource("route-analysis-focus")).toBeUndefined();
+  });
+
+  it("restores focus source/layers on style.load without duplicates", () => {
+    render(<MapView />);
+    const map = lastMap();
+    const internals = map as unknown as {
+      sources: globalThis.Map<string, unknown>;
+      layers: Set<string>;
+    };
+    internals.sources.delete("route-analysis-focus");
+    map.sourceData.delete("route-analysis-focus");
+    internals.layers.delete("route-analysis-focus-glow");
+    internals.layers.delete("route-analysis-focus-line");
+    act(() => map.emit("style.load"));
+    expect(map.getSource("route-analysis-focus")).toBeDefined();
+    expect(map.getLayer("route-analysis-focus-glow")).toBeDefined();
+    expect(map.getLayer("route-analysis-focus-line")).toBeDefined();
+    const sourceAdds = map.addSource.mock.calls.filter(
+      (call) => call[0] === "route-analysis-focus",
+    ).length;
+    act(() => map.emit("style.load"));
+    expect(map.addSource.mock.calls.filter(
+      (call) => call[0] === "route-analysis-focus",
+    )).toHaveLength(sourceAdds);
+  });
+
+  it("does not rebuild focus geometry for ordinary map hover", () => {
+    render(<MapView />);
+    setDataSpy.mockClear();
+    act(() => useStore.getState().setHoveredDebugSegmentIds([
+      "valhalla:0:0:0",
+    ], [77.2, 28.6]));
+    expect(setDataSpy).not.toHaveBeenCalled();
   });
 });
 

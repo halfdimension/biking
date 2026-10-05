@@ -96,6 +96,12 @@
   stroke-width: 2;
 }
 
+.route-analysis__active-band {
+  fill: #facc15;
+  opacity: 0.16;
+  pointer-events: none;
+}
+
 .route-analysis__cursor {
   stroke: #f59e0b;
   stroke-dasharray: 3 2;

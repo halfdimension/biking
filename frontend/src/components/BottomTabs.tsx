@@ -43,16 +43,21 @@ export default function BottomTabs() {
   const collapsed = useStore((s) => s.bottomCollapsed);
   const toggle = useStore((s) => s.toggleBottomCollapsed);
   const detailsPinned = useStore((s) => s.debugInspectorPinned);
+  const edgeDetailsOpenRequestId = useStore((s) => s.edgeDetailsOpenRequestId);
   const wasPinned = useRef(false);
+  const previousOpenRequestId = useRef(edgeDetailsOpenRequestId);
   const dragStart = useRef<{ y: number; height: number } | null>(null);
 
   useEffect(() => {
-    if (detailsPinned && !wasPinned.current) {
+    const explicitlyRequested =
+      edgeDetailsOpenRequestId !== previousOpenRequestId.current;
+    if (explicitlyRequested || (detailsPinned && !wasPinned.current)) {
       setActive("Edge Details");
       if (collapsed) toggle();
     }
     wasPinned.current = detailsPinned;
-  }, [collapsed, detailsPinned, toggle]);
+    previousOpenRequestId.current = edgeDetailsOpenRequestId;
+  }, [collapsed, detailsPinned, edgeDetailsOpenRequestId, toggle]);
 
   useEffect(() => {
     const onMove = (event: PointerEvent) => {

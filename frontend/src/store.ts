@@ -116,6 +116,8 @@ export interface AppState {
   /** Geographic point captured when the current segment set was pinned. */
   pinnedDebugPoint: [number, number] | null;
   debugInspectorPinned: boolean;
+  /** Monotonic signal used to open Edge Details even when already pinned. */
+  edgeDetailsOpenRequestId: number;
 
   // Trace Inspector state is independent from the comparison map interaction.
   traceSourceRouteId: string | null;
@@ -164,6 +166,8 @@ export interface AppState {
   routeAnalysisMetricId: RouteMetricId;
   routeAnalysisQuery: RouteAttributeQuery;
   routeAnalysisExecutedSearch: ExecutedRouteAnalysisSearch | null;
+  /** Transient chart-origin focus; full segments remain in debugResults. */
+  routeAnalysisFocusedSegmentId: string | null;
 
   // Persistence-backed (Req 13, 14)
   testCases: TestCase[];
@@ -246,6 +250,10 @@ export interface AppState {
     ids: string[],
     point?: [number, number] | null,
   ) => void;
+  pinDebugSegments: (
+    ids: string[],
+    point?: [number, number] | null,
+  ) => void;
   pinHoveredDebugSegments: () => void;
   unpinDebugInspector: () => void;
   clearDebugInteraction: () => void;
@@ -290,6 +298,7 @@ export interface AppState {
   ) => void;
   clearRouteAnalysisSearch: () => void;
 
+  setRouteAnalysisFocusedSegmentId: (id: string | null) => void;
   /** Request a manual map fit (Req 20.2); MapView reacts to `fitRequestId`. */
   requestFit: () => void;
 
@@ -421,6 +430,7 @@ function applyRawRoutes(
   | "pinnedDebugPoint"
   | "debugInspectorPinned"
   | "routeAnalysisExecutedSearch"
+  | "routeAnalysisFocusedSegmentId"
 > {
   const routes = result.normalizedRoutes;
   const visibility = buildVisibility(routes, () => true);
@@ -440,6 +450,7 @@ function applyRawRoutes(
     pinnedDebugPoint: null,
     debugInspectorPinned: false,
     routeAnalysisExecutedSearch: null,
+    routeAnalysisFocusedSegmentId: null,
   };
 }
 
@@ -584,6 +595,7 @@ export const useStore = create<AppState>((set, get) => ({
   pinnedDebugPoint: null,
   debugInspectorPinned: false,
 
+  edgeDetailsOpenRequestId: 0,
   traceSourceRouteId: null,
   traceSourceEncodedPolyline: null,
   traceStatus: "idle",
@@ -616,6 +628,7 @@ export const useStore = create<AppState>((set, get) => ({
   routeAnalysisQuery: { field: "speed", operator: "=", value: "" },
   routeAnalysisExecutedSearch: null,
 
+  routeAnalysisFocusedSegmentId: null,
   // Hydrate persisted test cases + assessments at store creation so a page
   // refresh restores saved scenarios (Req 13.3). Both loaders are safe and
   // never throw on corrupt storage (they degrade to []/{}).
@@ -665,6 +678,7 @@ export const useStore = create<AppState>((set, get) => ({
       pinnedDebugPoint: null,
       debugInspectorPinned: false,
       routeAnalysisExecutedSearch: null,
+      routeAnalysisFocusedSegmentId: null,
     });
     if (!start || !dest) {
       set({
@@ -704,6 +718,7 @@ export const useStore = create<AppState>((set, get) => ({
         visibility,
         selectedRouteId,
         debugResults: edgeDebugEnabled ? (results.debug ?? null) : null,
+        routeAnalysisFocusedSegmentId: null,
         compareStatus: "done",
         comparisonResultRevision: previous.comparisonResultRevision + 1,
         lastError: null,
@@ -739,6 +754,7 @@ export const useStore = create<AppState>((set, get) => ({
       pinnedDebugSegmentIds: [],
       pinnedDebugPoint: null,
       debugInspectorPinned: false,
+      routeAnalysisFocusedSegmentId: null,
     });
   },
 
@@ -759,16 +775,20 @@ export const useStore = create<AppState>((set, get) => ({
     });
   },
 
-  pinHoveredDebugSegments: () => {
-    const state = get();
-    const ids = state.hoveredDebugSegmentIds;
+  pinDebugSegments: (ids, point = null) => {
     if (ids.length === 0) return;
-    set({
+    set((state) => ({
       pinnedDebugSegmentIds: [...ids],
-      pinnedDebugPoint: state.hoveredDebugPoint,
+      pinnedDebugPoint: point,
       debugInspectorPinned: true,
       bottomCollapsed: false,
-    });
+      edgeDetailsOpenRequestId: state.edgeDetailsOpenRequestId + 1,
+    }));
+  },
+
+  pinHoveredDebugSegments: () => {
+    const state = get();
+    state.pinDebugSegments(state.hoveredDebugSegmentIds, state.hoveredDebugPoint);
   },
 
   unpinDebugInspector: () =>
@@ -785,6 +805,7 @@ export const useStore = create<AppState>((set, get) => ({
       pinnedDebugSegmentIds: [],
       pinnedDebugPoint: null,
       debugInspectorPinned: false,
+      routeAnalysisFocusedSegmentId: null,
     }),
 
   setTraceSourceRouteId: (routeId) => {
@@ -1009,6 +1030,7 @@ export const useStore = create<AppState>((set, get) => ({
   setRouteAnalysisRouteId: (routeId) =>
     set((state) => ({
       routeAnalysisRouteId: routeId,
+      routeAnalysisFocusedSegmentId: null,
       routeAnalysisExecutedSearch:
         state.routeAnalysisRouteId === routeId
           ? state.routeAnalysisExecutedSearch
@@ -1038,6 +1060,11 @@ export const useStore = create<AppState>((set, get) => ({
 
   clearRouteAnalysisSearch: () =>
     set({ routeAnalysisExecutedSearch: null }),
+
+  setRouteAnalysisFocusedSegmentId: (id) => {
+    if (get().routeAnalysisFocusedSegmentId === id) return;
+    set({ routeAnalysisFocusedSegmentId: id });
+  },
 
   requestFit: () => set((state) => ({ fitRequestId: state.fitRequestId + 1 })),
 

@@ -277,9 +277,16 @@ export function findProfileSegment(
       middle < profile.segments.length - 1
     ) {
       low = middle + 1;
-    } else return segment;
+    } else {
+      // A missing/zero length has no usable cumulative-distance interval. Do
+      // not invent a chart position for it (notably when it is the final item).
+      return segment.lengthMeters !== null &&
+        segment.endDistanceMeters > segment.startDistanceMeters
+        ? segment
+        : null;
+    }
   }
-  return profile.segments[Math.min(low, profile.segments.length - 1)] ?? null;
+  return null;
 }
 
 /** Display-only normalization; raw debug values remain untouched. */

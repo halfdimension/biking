@@ -114,6 +114,13 @@ function seed(debug: CompareDebug | null = debugResult(), selectedRouteId: strin
     debugResults: debug,
     edgeDebugEnabled: debug !== null,
     bottomCollapsed: false,
+    hoveredDebugSegmentIds: [],
+    hoveredDebugPoint: null,
+    pinnedDebugSegmentIds: [],
+    pinnedDebugPoint: null,
+    debugInspectorPinned: false,
+    edgeDetailsOpenRequestId: 0,
+    routeAnalysisFocusedSegmentId: null,
     visibility: { "osrm:0": true, "osrm:1": true, "valhalla:0": true },
     comparisonResultRevision: 1,
     routeAnalysisRouteId: null,
@@ -373,5 +380,137 @@ describe("Route Analysis", () => {
     fireEvent.click(screen.getByRole("button", { name: "Clear" }));
     expect(runCompare).not.toHaveBeenCalled();
     runCompare.mockRestore();
+  });
+
+  it("shares exact graph hover focus without repeated same-segment writes", () => {
+    render(<RouteAnalysis />);
+    let focusChanges = 0;
+    const unsubscribe = useStore.subscribe((state, previous) => {
+      if (
+        state.routeAnalysisFocusedSegmentId !==
+        previous.routeAnalysisFocusedSegmentId
+      ) {
+        focusChanges += 1;
+      }
+    });
+    const chart = screen.getByRole("img", {
+      name: "Valhalla Primary Speed step profile",
+    });
+    fireEvent.pointerMove(chart, { clientX: 100, clientY: 80 });
+    expect(useStore.getState().routeAnalysisFocusedSegmentId)
+      .toBe("valhalla:0:0:0");
+    fireEvent.pointerMove(chart, { clientX: 120, clientY: 80 });
+    expect(focusChanges).toBe(1);
+    // jsdom has no native PointerEvent, so dispatch a coordinate-bearing mouse
+    // event with the pointer event name for the React handler.
+    fireEvent(
+      chart,
+      new MouseEvent("pointermove", { bubbles: true, clientX: 400, clientY: 80 }),
+    );
+    expect(useStore.getState().routeAnalysisFocusedSegmentId)
+      .toBe("valhalla:0:0:1");
+    expect(focusChanges).toBe(2);
+    fireEvent.pointerLeave(chart);
+    expect(useStore.getState().routeAnalysisFocusedSegmentId).toBeNull();
+    unsubscribe();
+  });
+
+  it("shows an active-route map hover as the same graph span and tooltip", () => {
+    render(<RouteAnalysis />);
+    act(() => useStore.getState().setHoveredDebugSegmentIds([
+      "osrm:0:0:0",
+      "valhalla:0:0:1",
+    ]));
+    expect(screen.getByTestId("route-analysis-active-band")).toBeInTheDocument();
+    expect(screen.getByTestId("route-analysis-tooltip")).toHaveTextContent(
+      "Segment 1",
+    );
+  });
+
+  it("ignores map-hovered edges from another route", () => {
+    render(<RouteAnalysis />);
+    act(() => useStore.getState().setHoveredDebugSegmentIds(["osrm:0:0:0"]));
+    expect(screen.queryByTestId("route-analysis-active-band"))
+      .not.toBeInTheDocument();
+    expect(screen.queryByTestId("route-analysis-tooltip")).not.toBeInTheDocument();
+  });
+
+  it("gives local graph hover priority over map-driven focus", () => {
+    render(<RouteAnalysis />);
+    act(() => useStore.getState().setHoveredDebugSegmentIds([
+      "valhalla:0:0:1",
+    ]));
+    const chart = screen.getByRole("img", {
+      name: "Valhalla Primary Speed step profile",
+    });
+    expect(screen.getByTestId("route-analysis-tooltip")).toHaveTextContent(
+      "Segment 1",
+    );
+    fireEvent.pointerMove(chart, { clientX: 100, clientY: 80 });
+    expect(screen.getByTestId("route-analysis-tooltip")).toHaveTextContent(
+      "Segment 0",
+    );
+    fireEvent.pointerLeave(chart);
+    expect(screen.getByTestId("route-analysis-tooltip")).toHaveTextContent(
+      "Segment 1",
+    );
+  });
+
+  it("pins the exact clicked segment without changing selection or search", () => {
+    useStore.setState({ selectedRouteId: "osrm:0" });
+    render(<RouteAnalysis />);
+    fireEvent.change(screen.getByLabelText("Search value"), {
+      target: { value: "35" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Highlight" }));
+    const search = useStore.getState().routeAnalysisExecutedSearch;
+    const chart = screen.getByRole("img", {
+      name: "OSRM Primary Speed step profile",
+    });
+    fireEvent.click(chart, { clientX: 400, clientY: 80 });
+    const state = useStore.getState();
+    expect(state.pinnedDebugSegmentIds).toEqual(["osrm:0:0:1"]);
+    expect(state.pinnedDebugPoint).toBeNull();
+    expect(state.debugInspectorPinned).toBe(true);
+    expect(state.selectedRouteId).toBe("osrm:0");
+    expect(state.routeAnalysisExecutedSearch).toBe(search);
+  });
+
+  it("route changes and unmount clear focus with normal search invalidation", () => {
+    const rendered = render(<RouteAnalysis />);
+    fireEvent.change(screen.getByLabelText("Search value"), {
+      target: { value: "35" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Highlight" }));
+    const search = useStore.getState().routeAnalysisExecutedSearch;
+    const chart = screen.getByRole("img", {
+      name: "Valhalla Primary Speed step profile",
+    });
+    fireEvent.pointerMove(chart, { clientX: 100, clientY: 80 });
+    fireEvent.change(screen.getByLabelText("Route"), {
+      target: { value: "osrm:0" },
+    });
+    expect(useStore.getState().routeAnalysisFocusedSegmentId).toBeNull();
+    rendered.unmount();
+    expect(useStore.getState().routeAnalysisFocusedSegmentId).toBeNull();
+    expect(useStore.getState().routeAnalysisExecutedSearch).toBeNull();
+    expect(search).not.toBeNull();
+  });
+
+  it("explicit replacement pins reopen Edge Details and expand the panel", () => {
+    render(<BottomTabs />);
+    fireEvent.click(screen.getByRole("tab", { name: "Route Analysis" }));
+    act(() => useStore.getState().pinDebugSegments(["old-edge"], null));
+    expect(screen.getByRole("tab", { name: /Edge Details/i }))
+      .toHaveAttribute("aria-selected", "true");
+    fireEvent.click(screen.getByRole("tab", { name: "Route Analysis" }));
+    act(() => {
+      useStore.setState({ bottomCollapsed: true });
+      useStore.getState().pinDebugSegments(["new-edge"], null);
+    });
+    expect(screen.getByRole("tab", { name: /Edge Details/i }))
+      .toHaveAttribute("aria-selected", "true");
+    expect(useStore.getState().pinnedDebugSegmentIds).toEqual(["new-edge"]);
+    expect(useStore.getState().bottomCollapsed).toBe(false);
   });
 });

@@ -3,6 +3,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import {
@@ -19,6 +20,10 @@ import {
   type RouteProfile,
   type RouteProfileSegment,
 } from "../analysis/routeProfile";
+import {
+  buildRouteProfileSegmentLookup,
+  findHoveredProfileSegment,
+} from "../analysis/routeInteraction";
 import {
   defaultRouteQuery,
   deriveRouteQueryValueOptions,
@@ -181,13 +186,21 @@ function RouteProfileChart({
   profile,
   route,
   metric,
+  mapHoveredSegment,
+  onFocusSegment,
+  onPinSegment,
 }: {
   profile: RouteProfile;
   route: NormalizedRoute;
   metric: MetricDefinition;
+  mapHoveredSegment: RouteProfileSegment | null;
+  onFocusSegment: (id: string | null) => void;
+  onPinSegment: (id: string) => void;
 }) {
   const [containerRef, size] = useChartSize();
   const [hovered, setHovered] = useState<RouteProfileSegment | null>(null);
+  const [graphPointerActive, setGraphPointerActive] = useState(false);
+  const focusedIdRef = useRef<string | null>(null);
   const values = useMemo(
     () =>
       profile.segments
@@ -210,17 +223,44 @@ function RouteProfileChart({
     : [0];
   const yTicks = domain ? ticks(domain[0], domain[1]) : [];
 
-  const onPointerMove = (event: ReactPointerEvent<SVGSVGElement>) => {
+  const segmentAtPointer = (
+    event:
+      | ReactPointerEvent<SVGSVGElement>
+      | ReactMouseEvent<SVGSVGElement>,
+  ): RouteProfileSegment | null => {
     const box = event.currentTarget.getBoundingClientRect();
     const renderedWidth = box.width || size.width;
     const clientX = Number.isFinite(event.clientX)
       ? event.clientX
       : box.left + MARGIN.left;
     const localX = ((clientX - box.left) / renderedWidth) * size.width;
-    const clampedX = Math.max(MARGIN.left, Math.min(MARGIN.left + plotWidth, localX));
-    const distance = ((clampedX - MARGIN.left) / plotWidth) * profile.totalDistanceMeters;
-    setHovered(findProfileSegment(profile, distance));
+    if (localX < MARGIN.left || localX > MARGIN.left + plotWidth) return null;
+    const distance =
+      ((localX - MARGIN.left) / plotWidth) * profile.totalDistanceMeters;
+    return findProfileSegment(profile, distance);
   };
+
+  const onPointerMove = (event: ReactPointerEvent<SVGSVGElement>) => {
+    const next = segmentAtPointer(event);
+    if (!graphPointerActive) setGraphPointerActive(true);
+    if (next?.debugSegmentId !== hovered?.debugSegmentId) setHovered(next);
+    const nextId = next?.debugSegmentId ?? null;
+    if (focusedIdRef.current !== nextId) {
+      focusedIdRef.current = nextId;
+      onFocusSegment(nextId);
+    }
+  };
+
+  const onPointerLeave = () => {
+    setGraphPointerActive(false);
+    setHovered(null);
+    if (focusedIdRef.current !== null) {
+      focusedIdRef.current = null;
+      onFocusSegment(null);
+    }
+  };
+
+  const activeSegment = graphPointerActive ? hovered : mapHoveredSegment;
 
   return (
     <div className="route-analysis__chart" ref={containerRef} data-testid="route-profile-chart">
@@ -230,8 +270,13 @@ function RouteProfileChart({
         viewBox={`0 0 ${size.width} ${size.height}`}
         role="img"
         aria-label={`${route.label} ${metric.label} step profile`}
+        aria-description="Hover to inspect a routed edge. Click chart to pin edge details."
         onPointerMove={onPointerMove}
-        onPointerLeave={() => setHovered(null)}
+        onPointerLeave={onPointerLeave}
+        onClick={(event) => {
+          const segment = segmentAtPointer(event);
+          if (segment) onPinSegment(segment.debugSegmentId);
+        }}
       >
         <g className="route-analysis__grid">
           {xTicks.map((tick) => (
@@ -254,18 +299,34 @@ function RouteProfileChart({
           ))}
           <text className="route-analysis__unit" x={MARGIN.left} y={11}>{metric.unit}</text>
         </g>
+        {activeSegment ? (
+          <rect
+            className="route-analysis__active-band"
+            data-testid="route-analysis-active-band"
+            x={x(activeSegment.startDistanceMeters)}
+            y={MARGIN.top}
+            width={Math.max(
+              1,
+              x(activeSegment.endDistanceMeters) -
+                x(activeSegment.startDistanceMeters),
+            )}
+            height={plotHeight}
+          />
+        ) : null}
         <path className="route-analysis__profile" d={path} />
-        {hovered ? (
+        {activeSegment ? (
           <line
             className="route-analysis__cursor"
-            x1={x(hovered.startDistanceMeters)}
-            x2={x(hovered.startDistanceMeters)}
+            x1={x(activeSegment.startDistanceMeters)}
+            x2={x(activeSegment.startDistanceMeters)}
             y1={MARGIN.top}
             y2={MARGIN.top + plotHeight}
           />
         ) : null}
       </svg>
-      {hovered ? <Tooltip item={hovered} route={route} metric={metric} /> : null}
+      {activeSegment ? (
+        <Tooltip item={activeSegment} route={route} metric={metric} />
+      ) : null}
     </div>
   );
 }
@@ -293,6 +354,13 @@ export default function RouteAnalysis() {
     (state) => state.setRouteAnalysisExecutedSearch,
   );
   const clearSearch = useStore((state) => state.clearRouteAnalysisSearch);
+  const hoveredDebugSegmentIds = useStore(
+    (state) => state.hoveredDebugSegmentIds,
+  );
+  const setFocusedSegmentId = useStore(
+    (state) => state.setRouteAnalysisFocusedSegmentId,
+  );
+  const pinDebugSegments = useStore((state) => state.pinDebugSegments);
 
   const segments = useMemo(() => flattenDebugSegments(debug), [debug]);
   const segmentRouteIds = useMemo(
@@ -323,6 +391,11 @@ export default function RouteAnalysis() {
     setAnalysisRouteId,
   ]);
 
+  useEffect(() => {
+    if (!debug) setFocusedSegmentId(null);
+    return () => setFocusedSegmentId(null);
+  }, [debug, setFocusedSegmentId]);
+
   const route =
     analysisRoutes.find((item) => item.id === effectiveRouteId) ?? null;
   const profile = useMemo(
@@ -333,6 +406,20 @@ export default function RouteAnalysis() {
     [effectiveRouteId, segments],
   );
   const metric = routeMetric(metricId);
+  const profileLookup = useMemo(
+    () =>
+      profile
+        ? buildRouteProfileSegmentLookup(profile)
+        : new Map<string, RouteProfileSegment>(),
+    [profile],
+  );
+  const mapHoveredSegment = effectiveRouteId
+    ? findHoveredProfileSegment(
+        hoveredDebugSegmentIds,
+        effectiveRouteId,
+        profileLookup,
+      )
+    : null;
   const summary = useMemo(
     () => (profile ? summarizeMetric(profile, metric) : null),
     [metric, profile],
@@ -579,7 +666,14 @@ export default function RouteAnalysis() {
           {metric.label} is not available for this route/engine.
         </div>
       ) : (
-        <RouteProfileChart profile={profile} route={route} metric={metric} />
+        <RouteProfileChart
+          profile={profile}
+          route={route}
+          metric={metric}
+          mapHoveredSegment={mapHoveredSegment}
+          onFocusSegment={setFocusedSegmentId}
+          onPinSegment={(id) => pinDebugSegments([id], null)}
+        />
       )}
       {profile.warnings.length ? (
         <details className="route-analysis__warnings">

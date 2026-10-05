@@ -26,7 +26,7 @@
  * can be safely mocked in unit tests (`vi.mock("maplibre-gl")`); the pure
  * `resolveMapStyle` helper carries the logic that is unit-tested directly.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useStore } from "../store";
@@ -38,6 +38,7 @@ import {
 import { buildRoutesFeatureCollection } from "../map/routes";
 import {
   buildDebugSegmentsFeatureCollection,
+  buildDebugSegmentLookup,
   DEBUG_SEGMENTS_SOURCE_ID,
 } from "../map/debugSegments";
 import {
@@ -45,12 +46,18 @@ import {
   buildAnalysisMatchesFeatureCollection,
 } from "../map/analysisMatches";
 import {
+  ANALYSIS_FOCUS_SOURCE_ID,
+  buildAnalysisFocusFeatureCollection,
+} from "../map/analysisFocus";
+import {
   ROUTES_SOURCE_ID,
   HIT_LAYER_ID,
   DEBUG_HIT_LAYER_ID,
   DEBUG_HIGHLIGHT_LAYER_ID,
   ANALYSIS_MATCH_GLOW_LAYER_ID,
   ANALYSIS_MATCH_LAYER_ID,
+  ANALYSIS_FOCUS_GLOW_LAYER_ID,
+  ANALYSIS_FOCUS_LAYER_ID,
   hitLayerSpec,
   baseLayerSpec,
   selectedLayerSpec,
@@ -58,6 +65,8 @@ import {
   debugHitLayerSpec,
   analysisMatchGlowLayerSpec,
   analysisMatchLayerSpec,
+  analysisFocusGlowLayerSpec,
+  analysisFocusLayerSpec,
 } from "../map/layers";
 import { resolveSelectedRouteId, type RouteCandidate } from "../map/hitTest";
 import {
@@ -246,6 +255,14 @@ export default function MapView() {
   const pinnedDebugSegmentIds = useStore((s) => s.pinnedDebugSegmentIds);
   const routeAnalysisExecutedSearch = useStore(
     (s) => s.routeAnalysisExecutedSearch,
+  );
+  const routeAnalysisFocusedSegmentId = useStore(
+    (s) => s.routeAnalysisFocusedSegmentId,
+  );
+  const routeAnalysisRouteId = useStore((s) => s.routeAnalysisRouteId);
+  const debugSegmentLookup = useMemo(
+    () => buildDebugSegmentLookup(debugResults),
+    [debugResults],
   );
 
   // Map fitting inputs (Task 18.1). `compareStatus` drives the auto-fit after a
@@ -607,22 +624,25 @@ export default function MapView() {
 
       // Deliberate bottom → top order:
       // routes-base → routes-selected → analysis glow → analysis line →
-      // debug hover/pin highlight → transparent debug hit layer.
-      const beforeDebug = map.getLayer(DEBUG_HIGHLIGHT_LAYER_ID)
-        ? DEBUG_HIGHLIGHT_LAYER_ID
-        : undefined;
+      // analysis focus glow → analysis focus line → debug hover/pin highlight
+      // → transparent debug hit layer.
+      const beforeFocusOrDebug = map.getLayer(ANALYSIS_FOCUS_GLOW_LAYER_ID)
+        ? ANALYSIS_FOCUS_GLOW_LAYER_ID
+        : map.getLayer(DEBUG_HIGHLIGHT_LAYER_ID)
+          ? DEBUG_HIGHLIGHT_LAYER_ID
+          : undefined;
       if (!map.getLayer(ANALYSIS_MATCH_GLOW_LAYER_ID)) {
         const specification = analysisMatchGlowLayerSpec(
           ANALYSIS_MATCHES_SOURCE_ID,
         ) as maplibregl.LayerSpecification;
-        if (beforeDebug) map.addLayer(specification, beforeDebug);
+        if (beforeFocusOrDebug) map.addLayer(specification, beforeFocusOrDebug);
         else map.addLayer(specification);
       }
       if (!map.getLayer(ANALYSIS_MATCH_LAYER_ID)) {
         const specification = analysisMatchLayerSpec(
           ANALYSIS_MATCHES_SOURCE_ID,
         ) as maplibregl.LayerSpecification;
-        if (beforeDebug) map.addLayer(specification, beforeDebug);
+        if (beforeFocusOrDebug) map.addLayer(specification, beforeFocusOrDebug);
         else map.addLayer(specification);
       }
     };
@@ -643,6 +663,99 @@ export default function MapView() {
   }, [
     comparisonResultRevision,
     routeAnalysisExecutedSearch,
+    visibility,
+  ]);
+
+  // --- Transient Route Analysis chart focus source + layers ----------------
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    let waitingForIdle = false;
+    const handleIdle = () => {
+      waitingForIdle = false;
+      apply();
+    };
+    const scheduleWhenStyleSettles = () => {
+      if (waitingForIdle || !map.once) return;
+      waitingForIdle = true;
+      map.once("idle", handleIdle);
+    };
+
+    const apply = () => {
+      const existing = map.getSource(ANALYSIS_FOCUS_SOURCE_ID) as
+        | maplibregl.GeoJSONSource
+        | undefined;
+
+      // Avoid permanent map objects until a chart has focused an exact edge.
+      if (!routeAnalysisFocusedSegmentId && !existing) return;
+
+      const styleWasReady = Boolean(map.isStyleLoaded?.());
+      const routeVisible = routeAnalysisRouteId
+        ? (useStore.getState().visibility[routeAnalysisRouteId] ?? true)
+        : false;
+      const data = buildAnalysisFocusFeatureCollection(
+        routeAnalysisFocusedSegmentId,
+        routeAnalysisRouteId,
+        debugSegmentLookup,
+        routeVisible,
+      );
+
+      if (existing) {
+        existing.setData(data as unknown as GeoJSON.FeatureCollection);
+      } else {
+        if (!styleWasReady) {
+          scheduleWhenStyleSettles();
+          return;
+        }
+        map.addSource(ANALYSIS_FOCUS_SOURCE_ID, {
+          type: "geojson",
+          promoteId: "debugSegmentId",
+          data: data as unknown as GeoJSON.FeatureCollection,
+        });
+      }
+
+      if (!styleWasReady) {
+        scheduleWhenStyleSettles();
+        return;
+      }
+
+      const beforeDebug = map.getLayer(DEBUG_HIGHLIGHT_LAYER_ID)
+        ? DEBUG_HIGHLIGHT_LAYER_ID
+        : undefined;
+      if (!map.getLayer(ANALYSIS_FOCUS_GLOW_LAYER_ID)) {
+        const specification = analysisFocusGlowLayerSpec(
+          ANALYSIS_FOCUS_SOURCE_ID,
+        ) as maplibregl.LayerSpecification;
+        if (beforeDebug) map.addLayer(specification, beforeDebug);
+        else map.addLayer(specification);
+      }
+      if (!map.getLayer(ANALYSIS_FOCUS_LAYER_ID)) {
+        const specification = analysisFocusLayerSpec(
+          ANALYSIS_FOCUS_SOURCE_ID,
+        ) as maplibregl.LayerSpecification;
+        if (beforeDebug) map.addLayer(specification, beforeDebug);
+        else map.addLayer(specification);
+      }
+    };
+
+    map.on("style.load", apply);
+    if (
+      map.getSource(ANALYSIS_FOCUS_SOURCE_ID) ||
+      map.isStyleLoaded?.()
+    ) {
+      apply();
+    } else {
+      scheduleWhenStyleSettles();
+    }
+    return () => {
+      map.off("style.load", apply);
+      if (waitingForIdle) map.off("idle", handleIdle);
+    };
+  }, [
+    debugSegmentLookup,
+    routeAnalysisFocusedSegmentId,
+    routeAnalysisRouteId,
     visibility,
   ]);
 
