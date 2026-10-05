@@ -10,7 +10,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, act, fireEvent, screen } from "@testing-library/react";
 import MapView from "./MapView";
-import { useStore } from "../store";
+import { useStore, type ExecutedRouteAnalysisSearch } from "../store";
 import type { CompareDebug, NormalizedRoute } from "../types";
 
 // MapLibre GL does not run under jsdom. This lifecycle-aware mock keeps sources,
@@ -502,6 +502,175 @@ describe("MapView route rendering (Task 16)", () => {
     );
     act(() => useStore.getState().setEdgeDebugEnabled(false));
     styleLoaded = true;
+  });
+});
+
+
+describe("MapView analysis match overlay", () => {
+  function analysisSearch(revision = 0): ExecutedRouteAnalysisSearch {
+    const matched = debugResult().valhalla.segments[0];
+    return {
+      comparisonResultRevision: revision,
+      routeId: "valhalla:0",
+      query: { field: "speed", operator: "=", value: "40" },
+      result: {
+        matchingSegmentIds: [matched.id],
+        matchingSegments: [{
+          debugSegmentId: matched.id,
+          engine: matched.engine,
+          routeId: matched.routeId,
+          routeIndex: matched.routeIndex,
+          legIndex: matched.legIndex,
+          segmentIndex: matched.segmentIndex,
+          startDistanceMeters: 0,
+          endDistanceMeters: 100,
+          lengthMeters: 100,
+          lengthSource: "engine",
+          segment: matched,
+        }],
+        matchedDistanceMeters: 100,
+        matchedPercentage: 100,
+        totalSegmentCount: 1,
+        matchingSegmentCount: 1,
+        missingLengthSegmentCount: 0,
+        hasIncompleteDistanceCoverage: false,
+      },
+    };
+  }
+
+  beforeEach(() => {
+    mapInstances = [];
+    unsettleStyleWhenRoutesSourceIsAdded = false;
+    debugQueryFeatures = [];
+    styleLoaded = true;
+    setDataSpy.mockClear();
+    vi.clearAllMocks();
+    useStore.setState({
+      routes: [
+        route({ id: "osrm:0" }),
+        route({ id: "valhalla:0", engine: "valhalla" }),
+      ],
+      visibility: { "osrm:0": true, "valhalla:0": true },
+      selectedRouteId: "valhalla:0",
+      start: null,
+      dest: null,
+      compareStatus: "done",
+      fitRequestId: 0,
+      comparisonResultRevision: 4,
+      routeComparisonCamera: null,
+      routeComparisonCameraResultRevision: null,
+      edgeDebugEnabled: true,
+      debugResults: debugResult(),
+      hoveredDebugSegmentIds: [],
+      pinnedDebugSegmentIds: [],
+      routeAnalysisExecutedSearch: analysisSearch(4),
+    });
+  });
+
+  it("creates a match-only source in the deliberate route/analysis/debug layer order", () => {
+    render(<MapView />);
+    const map = lastMap();
+    expect(map.addSource).toHaveBeenCalledWith(
+      "route-analysis-matches",
+      expect.objectContaining({
+        type: "geojson",
+        promoteId: "debugSegmentId",
+      }),
+    );
+    const data = map.sourceData.get("route-analysis-matches") as {
+      features: Array<{ properties: Record<string, unknown> }>;
+    };
+    expect(data.features).toHaveLength(1);
+    expect(data.features[0].properties).toEqual({
+      debugSegmentId: "valhalla:0:0:0",
+      routeId: "valhalla:0",
+      engine: "valhalla",
+      segmentIndex: 0,
+    });
+    expect(map.addLayer.mock.calls.map((call) => (call[0] as { id: string }).id))
+      .toEqual([
+        "routes-hit",
+        "routes-base",
+        "routes-selected",
+        "route-analysis-matches-glow",
+        "route-analysis-matches-line",
+        "route-debug-highlight",
+        "route-debug-hit",
+      ]);
+  });
+
+  it("hides and restores match features with route visibility without rerunning the query", () => {
+    render(<MapView />);
+    const map = lastMap();
+    const executed = useStore.getState().routeAnalysisExecutedSearch;
+    const routesData = map.sourceData.get("routes");
+
+    act(() => useStore.getState().setVisibility("valhalla:0", false));
+    expect((map.sourceData.get("route-analysis-matches") as { features: unknown[] }).features).toEqual([]);
+    expect(map.sourceData.get("routes")).toBe(routesData);
+    expect(useStore.getState().routeAnalysisExecutedSearch).toBe(executed);
+
+    act(() => useStore.getState().setVisibility("valhalla:0", true));
+    expect((map.sourceData.get("route-analysis-matches") as { features: unknown[] }).features).toHaveLength(1);
+    expect(useStore.getState().routeAnalysisExecutedSearch).toBe(executed);
+  });
+
+  it("clears only the analysis source and leaves normal/debug sources intact", () => {
+    render(<MapView />);
+    const map = lastMap();
+    const routesData = map.sourceData.get("routes");
+    const debugData = map.sourceData.get("route-debug-segments");
+    act(() => useStore.getState().clearRouteAnalysisSearch());
+    expect((map.sourceData.get("route-analysis-matches") as { features: unknown[] }).features).toEqual([]);
+    expect(map.sourceData.get("routes")).toBe(routesData);
+    expect(map.sourceData.get("route-debug-segments")).toBe(debugData);
+  });
+
+  it("restores a valid overlay after a MapView remount", () => {
+    const first = render(<MapView />);
+    first.unmount();
+    render(<MapView />);
+    const map = lastMap();
+    expect((map.sourceData.get("route-analysis-matches") as { features: unknown[] }).features).toHaveLength(1);
+    expect(map.getLayer("route-analysis-matches-line")).toBeDefined();
+    expect(useStore.getState().routeAnalysisExecutedSearch).not.toBeNull();
+  });
+
+  it("restores analysis source/layers on style.load without duplicates", () => {
+    render(<MapView />);
+    const map = lastMap();
+    const internals = map as unknown as {
+      sources: globalThis.Map<string, unknown>;
+      layers: Set<string>;
+    };
+    internals.sources.delete("route-analysis-matches");
+    map.sourceData.delete("route-analysis-matches");
+    internals.layers.delete("route-analysis-matches-glow");
+    internals.layers.delete("route-analysis-matches-line");
+
+    act(() => map.emit("style.load"));
+    expect(map.getSource("route-analysis-matches")).toBeDefined();
+    expect(map.getLayer("route-analysis-matches-glow")).toBeDefined();
+    expect(map.getLayer("route-analysis-matches-line")).toBeDefined();
+
+    const sourceAdds = map.addSource.mock.calls.filter(
+      (call) => call[0] === "route-analysis-matches",
+    ).length;
+    act(() => map.emit("style.load"));
+    expect(map.addSource.mock.calls.filter(
+      (call) => call[0] === "route-analysis-matches",
+    )).toHaveLength(sourceAdds);
+  });
+
+  it("does not rebuild the match source on ordinary Edge Debug mouse state", () => {
+    render(<MapView />);
+    setDataSpy.mockClear();
+    act(() => useStore.getState().setHoveredDebugSegmentIds(["valhalla:0:0:0"], [77.2, 28.6]));
+    expect(setDataSpy).not.toHaveBeenCalled();
+    expect(lastMap().setFeatureState).toHaveBeenCalledWith(
+      { source: "route-debug-segments", id: "valhalla:0:0:0" },
+      expect.objectContaining({ hovered: true }),
+    );
   });
 });
 

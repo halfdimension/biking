@@ -103,6 +103,10 @@ function resetStore() {
     curlImportState: { status: "idle", engine: null, result: null, error: null },
     visibility: {},
     selectedRouteId: null,
+    routeAnalysisRouteId: null,
+    routeAnalysisMetricId: "speed",
+    routeAnalysisQuery: { field: "speed", operator: "=", value: "" },
+    routeAnalysisExecutedSearch: null,
     testCases: [],
     quality: {},
     assessments: {},
@@ -177,6 +181,35 @@ describe("store", () => {
       useStore.getState().selectRoute("valhalla:99");
       await useStore.getState().runCompare();
       expect(useStore.getState().selectedRouteId).toBeNull();
+    });
+
+    it("invalidates an executed Route Analysis search as soon as a new comparison starts", async () => {
+      vi.mocked(api.compare).mockResolvedValue(makeCompareResponse());
+      useStore.setState({
+        start: { lat: 1, lon: 1 },
+        dest: { lat: 2, lon: 2 },
+        routeAnalysisExecutedSearch: {
+          comparisonResultRevision: 0,
+          routeId: "valhalla:0",
+          query: { field: "speed", operator: "=", value: "40" },
+          result: {
+            matchingSegmentIds: ["old-segment"],
+            matchingSegments: [],
+            matchedDistanceMeters: 100,
+            matchedPercentage: 10,
+            totalSegmentCount: 10,
+            matchingSegmentCount: 1,
+            missingLengthSegmentCount: 0,
+            hasIncompleteDistanceCoverage: false,
+          },
+        },
+      });
+
+      const pending = useStore.getState().runCompare();
+      expect(useStore.getState().routeAnalysisExecutedSearch).toBeNull();
+      await pending;
+      expect(useStore.getState().routeAnalysisExecutedSearch).toBeNull();
+      expect(useStore.getState().comparisonResultRevision).toBe(1);
     });
 
     it("sets error status and message when api.compare rejects", async () => {

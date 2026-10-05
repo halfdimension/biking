@@ -33,6 +33,11 @@ import type {
   ValhallaTraceResult,
 } from "./types";
 import type { MapCameraState } from "./map/camera";
+import type { RouteMetricId } from "./analysis/routeProfile";
+import type {
+  RouteAttributeQuery,
+  RouteQueryResult,
+} from "./analysis/routeQuery";
 
 export type AppMode = "normal" | "advanced";
 export type MapClickTarget = "start" | "dest" | null;
@@ -40,6 +45,13 @@ export type CompareStatus = "idle" | "loading" | "done" | "error";
 export type RawStatus = "idle" | "loading" | "done" | "error";
 
 export type TraceStatus = "idle" | "loading" | "done" | "error";
+
+export interface ExecutedRouteAnalysisSearch {
+  comparisonResultRevision: number;
+  routeId: string;
+  query: RouteAttributeQuery;
+  result: RouteQueryResult;
+}
 /**
  * The lifecycle of a single Advanced/raw request send (Req 9.4–9.7). Kept in a
  * dedicated slice per engine so a raw-request failure never mislabels a
@@ -145,6 +157,13 @@ export interface AppState {
   // View state (Req 5, 6)
   visibility: Record<string, boolean>;
   selectedRouteId: string | null;
+
+  // Session-only Route Analysis state. It survives component/navigation
+  // remounts, but is deliberately not persisted to localStorage.
+  routeAnalysisRouteId: string | null;
+  routeAnalysisMetricId: RouteMetricId;
+  routeAnalysisQuery: RouteAttributeQuery;
+  routeAnalysisExecutedSearch: ExecutedRouteAnalysisSearch | null;
 
   // Persistence-backed (Req 13, 14)
   testCases: TestCase[];
@@ -263,6 +282,13 @@ export interface AppState {
   /** Explicit "Clear selection" control — sets `selectedRouteId` to null. */
   clearSelection: () => void;
   setVisibility: (routeId: string, visible: boolean) => void;
+  setRouteAnalysisRouteId: (routeId: string | null) => void;
+  setRouteAnalysisMetricId: (metricId: RouteMetricId) => void;
+  setRouteAnalysisQuery: (query: RouteAttributeQuery) => void;
+  setRouteAnalysisExecutedSearch: (
+    search: ExecutedRouteAnalysisSearch | null,
+  ) => void;
+  clearRouteAnalysisSearch: () => void;
 
   /** Request a manual map fit (Req 20.2); MapView reacts to `fitRequestId`. */
   requestFit: () => void;
@@ -394,6 +420,7 @@ function applyRawRoutes(
   | "pinnedDebugSegmentIds"
   | "pinnedDebugPoint"
   | "debugInspectorPinned"
+  | "routeAnalysisExecutedSearch"
 > {
   const routes = result.normalizedRoutes;
   const visibility = buildVisibility(routes, () => true);
@@ -412,6 +439,7 @@ function applyRawRoutes(
     pinnedDebugSegmentIds: [],
     pinnedDebugPoint: null,
     debugInspectorPinned: false,
+    routeAnalysisExecutedSearch: null,
   };
 }
 
@@ -583,6 +611,10 @@ export const useStore = create<AppState>((set, get) => ({
 
   visibility: {},
   selectedRouteId: null,
+  routeAnalysisRouteId: null,
+  routeAnalysisMetricId: "speed",
+  routeAnalysisQuery: { field: "speed", operator: "=", value: "" },
+  routeAnalysisExecutedSearch: null,
 
   // Hydrate persisted test cases + assessments at store creation so a page
   // refresh restores saved scenarios (Req 13.3). Both loaders are safe and
@@ -632,6 +664,7 @@ export const useStore = create<AppState>((set, get) => ({
       pinnedDebugSegmentIds: [],
       pinnedDebugPoint: null,
       debugInspectorPinned: false,
+      routeAnalysisExecutedSearch: null,
     });
     if (!start || !dest) {
       set({
@@ -972,6 +1005,39 @@ export const useStore = create<AppState>((set, get) => ({
   selectRoute: (routeId) => set({ selectedRouteId: routeId }),
 
   clearSelection: () => set({ selectedRouteId: null }),
+
+  setRouteAnalysisRouteId: (routeId) =>
+    set((state) => ({
+      routeAnalysisRouteId: routeId,
+      routeAnalysisExecutedSearch:
+        state.routeAnalysisRouteId === routeId
+          ? state.routeAnalysisExecutedSearch
+          : null,
+    })),
+
+  setRouteAnalysisMetricId: (metricId) =>
+    set({ routeAnalysisMetricId: metricId }),
+
+  setRouteAnalysisQuery: (query) =>
+    set((state) => {
+      const current = state.routeAnalysisQuery;
+      const changed =
+        current.field !== query.field ||
+        current.operator !== query.operator ||
+        current.value !== query.value;
+      return {
+        routeAnalysisQuery: query,
+        routeAnalysisExecutedSearch: changed
+          ? null
+          : state.routeAnalysisExecutedSearch,
+      };
+    }),
+
+  setRouteAnalysisExecutedSearch: (search) =>
+    set({ routeAnalysisExecutedSearch: search }),
+
+  clearRouteAnalysisSearch: () =>
+    set({ routeAnalysisExecutedSearch: null }),
 
   requestFit: () => set((state) => ({ fitRequestId: state.fitRequestId + 1 })),
 

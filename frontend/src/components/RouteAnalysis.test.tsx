@@ -114,6 +114,12 @@ function seed(debug: CompareDebug | null = debugResult(), selectedRouteId: strin
     debugResults: debug,
     edgeDebugEnabled: debug !== null,
     bottomCollapsed: false,
+    visibility: { "osrm:0": true, "osrm:1": true, "valhalla:0": true },
+    comparisonResultRevision: 1,
+    routeAnalysisRouteId: null,
+    routeAnalysisMetricId: "speed",
+    routeAnalysisQuery: { field: "speed", operator: "=", value: "" },
+    routeAnalysisExecutedSearch: null,
   });
 }
 
@@ -244,6 +250,127 @@ describe("Route Analysis", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Route Analysis" }));
     fireEvent.change(screen.getByLabelText("Route"), { target: { value: "osrm:0" } });
     fireEvent.change(screen.getByLabelText("Metric"), { target: { value: "density" } });
+    expect(runCompare).not.toHaveBeenCalled();
+    runCompare.mockRestore();
+  });
+
+  it("shows search controls with Valhalla-appropriate fields", () => {
+    render(<RouteAnalysis />);
+    expect(screen.getByRole("form", { name: "Search and highlight" })).toBeInTheDocument();
+    const fields = screen.getByLabelText("Search field");
+    expect(within(fields).getByRole("option", { name: "Road Class" })).toBeInTheDocument();
+    expect(within(fields).queryByRole("option", { name: "Datasource" })).not.toBeInTheDocument();
+  });
+
+  it("switches to OSRM fields and labels speed in km/h", () => {
+    render(<RouteAnalysis />);
+    fireEvent.change(screen.getByLabelText("Route"), { target: { value: "osrm:0" } });
+    const fields = screen.getByLabelText("Search field");
+    expect(within(fields).getByRole("option", { name: "Datasource" })).toBeInTheDocument();
+    expect(within(fields).queryByRole("option", { name: "Road Class" })).not.toBeInTheDocument();
+    expect(within(fields).getByRole("option", { name: "Speed (km/h)" })).toBeInTheDocument();
+    expect(screen.getByText("Value (km/h)")).toBeInTheDocument();
+  });
+
+  it("derives a categorical value dropdown from the selected route", () => {
+    render(<RouteAnalysis />);
+    fireEvent.change(screen.getByLabelText("Search field"), { target: { value: "roadClass" } });
+    const value = screen.getByLabelText("Search value");
+    expect(value.tagName).toBe("SELECT");
+    expect(within(value).getByRole("option", { name: "kPrimary" })).toBeInTheDocument();
+  });
+
+  it("keeps ID entry string-safe", () => {
+    render(<RouteAnalysis />);
+    fireEvent.change(screen.getByLabelText("Search field"), { target: { value: "wayId" } });
+    const value = screen.getByLabelText("Search value");
+    expect(value).toHaveAttribute("type", "text");
+    fireEvent.change(value, { target: { value: "90071992547409931234" } });
+    expect(value).toHaveValue("90071992547409931234");
+    expect(useStore.getState().routeAnalysisQuery.value).toBe("90071992547409931234");
+  });
+
+  it("highlights a query and reports count, distance, and route percentage", () => {
+    render(<RouteAnalysis />);
+    fireEvent.change(screen.getByLabelText("Search value"), { target: { value: "35" } });
+    fireEvent.click(screen.getByRole("button", { name: "Highlight" }));
+    const stats = screen.getByLabelText("Match statistics");
+    expect(stats).toHaveTextContent("1 matching segments");
+    expect(stats).toHaveTextContent("100 m matched");
+    expect(stats).toHaveTextContent("33.3% of route");
+    expect(useStore.getState().routeAnalysisExecutedSearch?.result.matchingSegmentIds)
+      .toEqual(["valhalla:0:0:0"]);
+  });
+
+  it("clears an executed result without changing routes, selection, or debug pin", () => {
+    useStore.setState({
+      selectedRouteId: "osrm:0",
+      pinnedDebugSegmentIds: ["valhalla:0:0:0"],
+      debugInspectorPinned: true,
+    });
+    render(<RouteAnalysis />);
+    fireEvent.change(screen.getByLabelText("Search value"), { target: { value: "35" } });
+    fireEvent.click(screen.getByRole("button", { name: "Highlight" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+    expect(screen.queryByLabelText("Match statistics")).not.toBeInTheDocument();
+    expect(useStore.getState().routeAnalysisExecutedSearch).toBeNull();
+    expect(useStore.getState().selectedRouteId).toBe("osrm:0");
+    expect(useStore.getState().pinnedDebugSegmentIds).toEqual(["valhalla:0:0:0"]);
+  });
+
+  it("invalidates old results immediately when route or field changes", () => {
+    render(<RouteAnalysis />);
+    fireEvent.change(screen.getByLabelText("Search value"), { target: { value: "35" } });
+    fireEvent.click(screen.getByRole("button", { name: "Highlight" }));
+    expect(screen.getByLabelText("Match statistics")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Search field"), { target: { value: "density" } });
+    expect(screen.queryByLabelText("Match statistics")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Search value"), { target: { value: "3" } });
+    fireEvent.click(screen.getByRole("button", { name: "Highlight" }));
+    fireEvent.change(screen.getByLabelText("Route"), { target: { value: "osrm:0" } });
+    expect(screen.queryByLabelText("Match statistics")).not.toBeInTheDocument();
+  });
+
+  it("keeps an executed search when only the chart metric changes", () => {
+    render(<RouteAnalysis />);
+    fireEvent.change(screen.getByLabelText("Search value"), { target: { value: "35" } });
+    fireEvent.click(screen.getByRole("button", { name: "Highlight" }));
+    const executed = useStore.getState().routeAnalysisExecutedSearch;
+    fireEvent.change(screen.getByLabelText("Metric"), { target: { value: "density" } });
+    expect(screen.getByLabelText("Match statistics")).toBeInTheDocument();
+    expect(useStore.getState().routeAnalysisExecutedSearch).toBe(executed);
+  });
+
+  it("restores selection, query, and result after a component remount", () => {
+    const rendered = render(<RouteAnalysis />);
+    fireEvent.change(screen.getByLabelText("Search value"), { target: { value: "35" } });
+    fireEvent.click(screen.getByRole("button", { name: "Highlight" }));
+    rendered.unmount();
+    render(<RouteAnalysis />);
+    expect(screen.getByLabelText("Route")).toHaveValue("valhalla:0");
+    expect(screen.getByLabelText("Search value")).toHaveValue(35);
+    expect(screen.getByLabelText("Match statistics")).toBeInTheDocument();
+  });
+
+  it("shows a hidden-route message while preserving the executed result", () => {
+    render(<RouteAnalysis />);
+    fireEvent.change(screen.getByLabelText("Search value"), { target: { value: "35" } });
+    fireEvent.click(screen.getByRole("button", { name: "Highlight" }));
+    act(() => useStore.getState().setVisibility("valhalla:0", false));
+    expect(screen.getByText("Selected analysis route is hidden on the map.")).toBeInTheDocument();
+    expect(useStore.getState().routeAnalysisExecutedSearch).not.toBeNull();
+    act(() => useStore.getState().setVisibility("valhalla:0", true));
+    expect(screen.queryByText("Selected analysis route is hidden on the map.")).not.toBeInTheDocument();
+  });
+
+  it("does not request an API comparison when highlighting or clearing", () => {
+    const runCompare = vi.spyOn(useStore.getState(), "runCompare");
+    render(<RouteAnalysis />);
+    fireEvent.change(screen.getByLabelText("Search value"), { target: { value: "35" } });
+    fireEvent.click(screen.getByRole("button", { name: "Highlight" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
     expect(runCompare).not.toHaveBeenCalled();
     runCompare.mockRestore();
   });

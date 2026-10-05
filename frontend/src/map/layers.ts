@@ -167,3 +167,39 @@ export function debugHitLayerSpec(sourceId: string) {
     },
   };
 }
+
+export const ANALYSIS_MATCH_GLOW_LAYER_ID = "route-analysis-matches-glow";
+export const ANALYSIS_MATCH_LAYER_ID = "route-analysis-matches-line";
+
+/**
+ * Additive Route Analysis overlay. The dark outline separates the cyan match
+ * line from both route color families; debug hover/pin layers are added above.
+ */
+export function analysisMatchGlowLayerSpec(sourceId: string) {
+  return {
+    id: ANALYSIS_MATCH_GLOW_LAYER_ID,
+    type: "line" as const,
+    source: sourceId,
+    layout: { "line-cap": "round" as const, "line-join": "round" as const },
+    paint: {
+      "line-color": "#0f172a",
+      "line-width": 11,
+      "line-opacity": 0.68,
+      "line-blur": 0.8,
+    },
+  };
+}
+
+export function analysisMatchLayerSpec(sourceId: string) {
+  return {
+    id: ANALYSIS_MATCH_LAYER_ID,
+    type: "line" as const,
+    source: sourceId,
+    layout: { "line-cap": "round" as const, "line-join": "round" as const },
+    paint: {
+      "line-color": "#22d3ee",
+      "line-width": 6,
+      "line-opacity": 0.96,
+    },
+  };
+}

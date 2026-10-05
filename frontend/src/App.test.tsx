@@ -208,6 +208,34 @@ describe("App layout shell", () => {
       },
       valhalla: { engine: "valhalla", status: "ok", errors: [], segments: [] },
     } as unknown as CompareDebug;
+    const preservedSegment = preservedDebug.osrm.segments[0];
+    const preservedSearch = {
+      comparisonResultRevision: 7,
+      routeId: "osrm:0",
+      query: { field: "speed" as const, operator: "=" as const, value: "40" },
+      result: {
+        matchingSegmentIds: [preservedSegment.id],
+        matchingSegments: [{
+          debugSegmentId: preservedSegment.id,
+          engine: preservedSegment.engine,
+          routeId: preservedSegment.routeId,
+          routeIndex: preservedSegment.routeIndex,
+          legIndex: preservedSegment.legIndex,
+          segmentIndex: preservedSegment.segmentIndex,
+          startDistanceMeters: 0,
+          endDistanceMeters: 100,
+          lengthMeters: 100,
+          lengthSource: "engine" as const,
+          segment: preservedSegment,
+        }],
+        matchedDistanceMeters: 100,
+        matchedPercentage: 100,
+        totalSegmentCount: 1,
+        matchingSegmentCount: 1,
+        missingLengthSegmentCount: 0,
+        hasIncompleteDistanceCoverage: false,
+      },
+    };
     useStore.setState({
       routes: [preservedRoute],
       visibility: { "osrm:0": true },
@@ -215,6 +243,11 @@ describe("App layout shell", () => {
       debugResults: preservedDebug,
       edgeDebugEnabled: true,
       compareStatus: "done",
+      comparisonResultRevision: 7,
+      routeAnalysisRouteId: "osrm:0",
+      routeAnalysisMetricId: "speed",
+      routeAnalysisQuery: preservedSearch.query,
+      routeAnalysisExecutedSearch: preservedSearch,
     });
     await renderApp();
     const navigation = screen.getByRole("navigation", { name: "Dashboard screens" });
@@ -235,6 +268,13 @@ describe("App layout shell", () => {
       "true",
     );
     expect(api.compare).not.toHaveBeenCalled();
+    expect(state.routeAnalysisExecutedSearch).toBe(preservedSearch);
+    fireEvent.click(screen.getByRole("tab", { name: "Route Analysis" }));
+    expect(screen.getByLabelText("Route")).toHaveValue("osrm:0");
+    expect(screen.getByLabelText("Search value")).toHaveValue(40);
+    expect(screen.getByLabelText("Match statistics")).toHaveTextContent(
+      "1 matching segments",
+    );
     expect(api.valhallaTrace).not.toHaveBeenCalled();
   });
 

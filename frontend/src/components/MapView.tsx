@@ -41,14 +41,23 @@ import {
   DEBUG_SEGMENTS_SOURCE_ID,
 } from "../map/debugSegments";
 import {
+  ANALYSIS_MATCHES_SOURCE_ID,
+  buildAnalysisMatchesFeatureCollection,
+} from "../map/analysisMatches";
+import {
   ROUTES_SOURCE_ID,
   HIT_LAYER_ID,
   DEBUG_HIT_LAYER_ID,
+  DEBUG_HIGHLIGHT_LAYER_ID,
+  ANALYSIS_MATCH_GLOW_LAYER_ID,
+  ANALYSIS_MATCH_LAYER_ID,
   hitLayerSpec,
   baseLayerSpec,
   selectedLayerSpec,
   debugHighlightLayerSpec,
   debugHitLayerSpec,
+  analysisMatchGlowLayerSpec,
+  analysisMatchLayerSpec,
 } from "../map/layers";
 import { resolveSelectedRouteId, type RouteCandidate } from "../map/hitTest";
 import {
@@ -235,6 +244,9 @@ export default function MapView() {
   const debugResults = useStore((s) => s.debugResults);
   const hoveredDebugSegmentIds = useStore((s) => s.hoveredDebugSegmentIds);
   const pinnedDebugSegmentIds = useStore((s) => s.pinnedDebugSegmentIds);
+  const routeAnalysisExecutedSearch = useStore(
+    (s) => s.routeAnalysisExecutedSearch,
+  );
 
   // Map fitting inputs (Task 18.1). `compareStatus` drives the auto-fit after a
   // successful Compare; `fitRequestId` is a monotonic counter bumped by the
@@ -536,6 +548,103 @@ export default function MapView() {
     if (!map.getSource(ROUTES_SOURCE_ID)) return;
     applyFeatureState(map, routes, visibility, selectedRouteId);
   }, [routes, visibility, selectedRouteId]);
+
+  // --- Additive Route Analysis match source + layers -----------------------
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    let waitingForIdle = false;
+    const handleIdle = () => {
+      waitingForIdle = false;
+      apply();
+    };
+    const scheduleWhenStyleSettles = () => {
+      if (waitingForIdle || !map.once) return;
+      waitingForIdle = true;
+      map.once("idle", handleIdle);
+    };
+
+    const apply = () => {
+      const search =
+        routeAnalysisExecutedSearch?.comparisonResultRevision ===
+        comparisonResultRevision
+          ? routeAnalysisExecutedSearch
+          : null;
+      const existing = map.getSource(ANALYSIS_MATCHES_SOURCE_ID) as
+        | maplibregl.GeoJSONSource
+        | undefined;
+
+      // Keep the map pristine until a query has actually been executed.
+      if (!search && !existing) return;
+
+      const styleWasReady = Boolean(map.isStyleLoaded?.());
+      const data = buildAnalysisMatchesFeatureCollection(
+        search?.routeId ?? null,
+        search?.result ?? null,
+        search
+          ? (useStore.getState().visibility[search.routeId] ?? true)
+          : false,
+      );
+      if (existing) {
+        existing.setData(data as unknown as GeoJSON.FeatureCollection);
+      } else {
+        if (!styleWasReady) {
+          scheduleWhenStyleSettles();
+          return;
+        }
+        map.addSource(ANALYSIS_MATCHES_SOURCE_ID, {
+          type: "geojson",
+          promoteId: "debugSegmentId",
+          data: data as unknown as GeoJSON.FeatureCollection,
+        });
+      }
+
+      if (!styleWasReady) {
+        scheduleWhenStyleSettles();
+        return;
+      }
+
+      // Deliberate bottom → top order:
+      // routes-base → routes-selected → analysis glow → analysis line →
+      // debug hover/pin highlight → transparent debug hit layer.
+      const beforeDebug = map.getLayer(DEBUG_HIGHLIGHT_LAYER_ID)
+        ? DEBUG_HIGHLIGHT_LAYER_ID
+        : undefined;
+      if (!map.getLayer(ANALYSIS_MATCH_GLOW_LAYER_ID)) {
+        const specification = analysisMatchGlowLayerSpec(
+          ANALYSIS_MATCHES_SOURCE_ID,
+        ) as maplibregl.LayerSpecification;
+        if (beforeDebug) map.addLayer(specification, beforeDebug);
+        else map.addLayer(specification);
+      }
+      if (!map.getLayer(ANALYSIS_MATCH_LAYER_ID)) {
+        const specification = analysisMatchLayerSpec(
+          ANALYSIS_MATCHES_SOURCE_ID,
+        ) as maplibregl.LayerSpecification;
+        if (beforeDebug) map.addLayer(specification, beforeDebug);
+        else map.addLayer(specification);
+      }
+    };
+
+    map.on("style.load", apply);
+    if (
+      map.getSource(ANALYSIS_MATCHES_SOURCE_ID) ||
+      map.isStyleLoaded?.()
+    ) {
+      apply();
+    } else {
+      scheduleWhenStyleSettles();
+    }
+    return () => {
+      map.off("style.load", apply);
+      if (waitingForIdle) map.off("idle", handleIdle);
+    };
+  }, [
+    comparisonResultRevision,
+    routeAnalysisExecutedSearch,
+    visibility,
+  ]);
 
   // --- Independent edge-debug source + layers -------------------------------
   useEffect(() => {
