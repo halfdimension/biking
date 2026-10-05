@@ -9,12 +9,6 @@
  *
  *   - `visible`      → `["boolean", ["feature-state","visible"], true]`  (default true)
  *   - `selected`     → `["boolean", ["feature-state","selected"], false]` (default false)
- *   - `hasSelection` → `["boolean", ["feature-state","hasSelection"], false]` (default false)
- *
- * `hasSelection` exists because a per-feature expression cannot observe whether a
- * selection exists on some OTHER feature. MapView already loops every route when
- * applying feature-state, so it sets the same flag on all of them, which keeps
- * "dim the others only when something is selected" fully declarative in paint.
  *
  * Sensible defaults mean that before any `setFeatureState` call, features still
  * render visible and unselected. Layer stacking (bottom → top):
@@ -34,8 +28,6 @@ export const SELECTED_LAYER_ID = "routes-selected";
 const VISIBLE_EXPR = ["boolean", ["feature-state", "visible"], true] as const;
 /** `feature-state.selected`, defaulting to false when unset. */
 const SELECTED_EXPR = ["boolean", ["feature-state", "selected"], false] as const;
-/** `feature-state.hasSelection` — true when ANY route is currently selected. */
-const HAS_SELECTION_EXPR = ["boolean", ["feature-state", "hasSelection"], false] as const;
 
 /**
  * `routes-hit` — transparent wide line used only for click hit-testing (Task 20).
@@ -64,16 +56,10 @@ export function hitLayerSpec() {
  * primary ≈5px / alternate ≈4px at overview zoom (8), growing to 7px / 6px when
  * zoomed in (14) so lines stay readable without smothering the basemap.
  *
- * Opacity ladder (design Req 6.5):
- *   - hidden                                   → 0
- *   - selected                                 → 1 (fully opaque)
- *   - another route is selected (!selected)    → 0.4 (dimmed)
- *   - otherwise (nothing selected, visible)    → 0.85 (normal)
- *
- * The old ladder had no way to tell "nothing is selected" from "something else
- * is selected", so every visible route dimmed even with no selection. The
- * `hasSelection` flag fixes that: normal visible routes stay at 0.85 until a
- * selection actually exists.
+ * Opacity depends only on visibility: every visible route keeps its normal 0.85
+ * base opacity before, during, and after selection. Selection emphasis is purely
+ * additive and is supplied by `routes-selected`, which is stacked above this
+ * layer. Hidden routes remain fully transparent.
  */
 export function baseLayerSpec() {
   return {
@@ -94,17 +80,9 @@ export function baseLayerSpec() {
       ],
       "line-opacity": [
         "case",
-        // Hidden routes collapse to fully transparent.
-        ["!", VISIBLE_EXPR],
-        0,
-        // The selected route is fully opaque.
-        SELECTED_EXPR,
-        1,
-        // Some OTHER route is selected → dim this one.
-        HAS_SELECTION_EXPR,
-        0.4,
-        // Nothing selected: normal visible weight.
+        VISIBLE_EXPR,
         0.85,
+        0,
       ],
     },
   };

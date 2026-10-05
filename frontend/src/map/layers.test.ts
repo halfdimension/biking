@@ -2,7 +2,7 @@
  * Unit tests for the routes source/layer paint specs (Task 19 visual refinement).
  *
  * These are pure spec objects — no MapLibre or jsdom needed — so the visual
- * contract (widths, opacity ladder, layer order, and the design-critical
+ * contract (widths, additive selection, layer order, and the design-critical
  * "no filter" rule) is regression-covered structurally.
  */
 import { describe, it, expect } from "vitest";
@@ -18,7 +18,6 @@ import {
 
 const VISIBLE_EXPR = ["boolean", ["feature-state", "visible"], true];
 const SELECTED_EXPR = ["boolean", ["feature-state", "selected"], false];
-const HAS_SELECTION_EXPR = ["boolean", ["feature-state", "hasSelection"], false];
 
 describe("routes layer specs", () => {
   it("all three layers read the single combined source and use NO filter", () => {
@@ -85,17 +84,24 @@ describe("baseLayerSpec paint", () => {
     expect(width[6]).toEqual(["case", ["get", "isPrimary"], 7, 6]);
   });
 
-  it("uses the hidden → selected → other-selected → normal opacity ladder", () => {
+  it("keeps normal opacity for every visible route regardless of selection", () => {
     expect(paint["line-opacity"]).toEqual([
       "case",
-      ["!", VISIBLE_EXPR],
-      0,
-      SELECTED_EXPR,
-      1,
-      HAS_SELECTION_EXPR,
-      0.4,
+      VISIBLE_EXPR,
       0.85,
+      0,
     ]);
+
+    // Neither this route's selected state nor another route's hasSelection
+    // state may alter the base paint. The selected layer supplies emphasis.
+    const opacityJson = JSON.stringify(paint["line-opacity"]);
+    expect(opacityJson).not.toContain('"selected"');
+    expect(opacityJson).not.toContain('"hasSelection"');
+  });
+
+  it("keeps explicitly hidden routes transparent", () => {
+    const opacity = paint["line-opacity"] as unknown[];
+    expect(opacity[opacity.length - 1]).toBe(0);
   });
 });
 

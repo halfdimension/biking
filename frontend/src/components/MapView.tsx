@@ -124,9 +124,9 @@ function fitTo(map: maplibregl.Map | null, coords: [number, number][]): void {
  * (promoted to the feature id via `promoteId`). `visible` defaults to true when
  * the route has no explicit visibility entry (newly returned routes render
  * visible). `selected` is true only for the currently selected route.
- * `hasSelection` is the same value on EVERY route — true when any route is
- * selected — because a paint expression cannot see other features' state; the
- * base layer uses it to dim non-selected routes only while a selection exists.
+ * `hasSelection` remains available on every route for feature-state compatibility,
+ * but route paint deliberately does not use it: selection is additive and must
+ * never change another visible route's base appearance.
  *
  * MUST be called after every `setData` because feature-state does NOT survive a
  * source-data replacement.
