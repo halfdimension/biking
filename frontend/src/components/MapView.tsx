@@ -499,14 +499,27 @@ export default function MapView() {
     const map = mapRef.current;
     if (!map) return;
 
+    let waitingForIdle = false;
+
+    const handleIdle = () => {
+      waitingForIdle = false;
+      apply();
+    };
+
+    const scheduleWhenStyleSettles = () => {
+      if (waitingForIdle || !map.once) return;
+      waitingForIdle = true;
+      map.once("idle", handleIdle);
+    };
+
     const apply = () => {
+      // Snapshot readiness before mutating the style. Adding/updating the route
+      // source in the preceding effect can make MapLibre transiently report
+      // isStyleLoaded() === false while this callback is running.
+      const styleWasReady = Boolean(map.isStyleLoaded?.());
       const existing = map.getSource(DEBUG_SEGMENTS_SOURCE_ID) as
         | maplibregl.GeoJSONSource
         | undefined;
-
-      // An existing GeoJSON source can accept setData while the style is
-      // settling. Only source/layer creation needs a fully loaded style.
-      if (!existing && (!map.isStyleLoaded || !map.isStyleLoaded())) return;
 
       // OFF before first use means no debug source/layers are created at all.
       if (!edgeDebugEnabled && !existing) return;
@@ -516,27 +529,46 @@ export default function MapView() {
         visibility,
       );
       if (existing) {
+        // An existing GeoJSON source can accept setData while the style settles.
         existing.setData(data as unknown as GeoJSON.FeatureCollection);
       } else {
+        if (!styleWasReady) {
+          // Do not discard pre-existing comparison data during a MapView
+          // remount. The one-shot idle that invoked us may have been consumed
+          // just before the route source unsettled the style, so explicitly
+          // queue another settle pass.
+          scheduleWhenStyleSettles();
+          return;
+        }
         map.addSource(DEBUG_SEGMENTS_SOURCE_ID, {
           type: "geojson",
           promoteId: "debugSegmentId",
           data: data as unknown as GeoJSON.FeatureCollection,
         });
-        if (!map.getLayer(debugHighlightLayerSpec(DEBUG_SEGMENTS_SOURCE_ID).id)) {
-          map.addLayer(
-            debugHighlightLayerSpec(
-              DEBUG_SEGMENTS_SOURCE_ID,
-            ) as maplibregl.LayerSpecification,
-          );
-        }
-        if (!map.getLayer(debugHitLayerSpec(DEBUG_SEGMENTS_SOURCE_ID).id)) {
-          map.addLayer(
-            debugHitLayerSpec(
-              DEBUG_SEGMENTS_SOURCE_ID,
-            ) as maplibregl.LayerSpecification,
-          );
-        }
+      }
+
+      // Use the readiness snapshot above: MapLibre may flip readiness to false
+      // immediately after addSource/setData even though adding sibling layers is
+      // valid in the same ready-style transaction. If an existing source was
+      // updated during a genuinely unsettled style, finish layer restoration on
+      // the next idle event.
+      if (!styleWasReady) {
+        scheduleWhenStyleSettles();
+        return;
+      }
+      if (!map.getLayer(debugHighlightLayerSpec(DEBUG_SEGMENTS_SOURCE_ID).id)) {
+        map.addLayer(
+          debugHighlightLayerSpec(
+            DEBUG_SEGMENTS_SOURCE_ID,
+          ) as maplibregl.LayerSpecification,
+        );
+      }
+      if (!map.getLayer(debugHitLayerSpec(DEBUG_SEGMENTS_SOURCE_ID).id)) {
+        map.addLayer(
+          debugHitLayerSpec(
+            DEBUG_SEGMENTS_SOURCE_ID,
+          ) as maplibregl.LayerSpecification,
+        );
       }
 
       // setData clears feature-state; restore the current exact highlight set.
@@ -561,17 +593,22 @@ export default function MapView() {
       previousActiveDebugIdsRef.current = state.edgeDebugEnabled ? active : [];
     };
 
+    // A style reload removes custom sources/layers. Rehydrate them from the
+    // preserved comparison state without issuing another comparison request.
+    map.on("style.load", apply);
     const canApplyNow =
       Boolean(map.getSource(DEBUG_SEGMENTS_SOURCE_ID)) ||
       Boolean(map.isStyleLoaded && map.isStyleLoaded());
     if (canApplyNow) {
       apply();
-    } else if (map.once) {
-      map.once("idle", apply);
-      return () => {
-        map.off("idle", apply);
-      };
+    } else {
+      scheduleWhenStyleSettles();
     }
+
+    return () => {
+      map.off("style.load", apply);
+      if (waitingForIdle) map.off("idle", handleIdle);
+    };
   }, [debugResults, edgeDebugEnabled, visibility]);
 
   // Update only feature-state on hover/pin changes; never rebuild GeoJSON on

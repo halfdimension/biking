@@ -13,59 +13,115 @@ import MapView from "./MapView";
 import { useStore } from "../store";
 import type { CompareDebug, NormalizedRoute } from "../types";
 
-// A single shared mock map instance so tests can inspect the calls MapView
-// makes. getSource returns undefined until addSource is called, then a stub
-// with a setData spy so the "routes changed" path exercises setData.
+// MapLibre GL does not run under jsdom. This lifecycle-aware mock keeps sources,
+// layers, and event listeners per map instance so remount behavior can be tested.
 const setDataSpy = vi.fn();
-let sourceCreated = false;
-// Knob for the mock's `isStyleLoaded()`. Defaults to true; a regression test
-// sets it false to reproduce the real-world condition where the style reports
-// "not loaded" right after a source `setData`.
 let styleLoaded = true;
+let unsettleStyleWhenRoutesSourceIsAdded = false;
+let debugQueryFeatures: unknown[] = [];
+
+type MapEventHandler = (...args: unknown[]) => void;
 
 interface MockMap {
   addSource: ReturnType<typeof vi.fn>;
   addLayer: ReturnType<typeof vi.fn>;
+  getSource: ReturnType<typeof vi.fn>;
+  getLayer: ReturnType<typeof vi.fn>;
   setFeatureState: ReturnType<typeof vi.fn>;
   fitBounds: ReturnType<typeof vi.fn>;
   easeTo: ReturnType<typeof vi.fn>;
   jumpTo: ReturnType<typeof vi.fn>;
   getBounds: ReturnType<typeof vi.fn>;
+  queryRenderedFeatures: ReturnType<typeof vi.fn>;
+  remove: ReturnType<typeof vi.fn>;
+  sourceData: globalThis.Map<string, unknown>;
+  emit: (event: string, ...args: unknown[]) => void;
+  listenerCount: (event: string) => number;
 }
 
-// Module-level reference to the most recently constructed mock map so tests can
-// inspect the calls MapView made against it.
 let mapInstance: MockMap;
-// The config object passed to the most recent `new maplibregl.Map(config)` call
-// so a test can assert the initial camera (Delhi NCR default center, Req 20.5).
+let mapInstances: MockMap[] = [];
 let mapConstructorConfig: { center?: [number, number]; zoom?: number } | undefined;
 
 vi.mock("maplibre-gl", () => {
   class Map {
-    on = vi.fn();
-    off = vi.fn();
-    once = vi.fn();
-    addControl = vi.fn();
-    remove = vi.fn();
-    isStyleLoaded = vi.fn(() => styleLoaded);
-    addSource = vi.fn(() => {
-      sourceCreated = true;
+    sources = new globalThis.Map<string, { setData: (data: unknown) => void }>();
+    sourceData = new globalThis.Map<string, unknown>();
+    layers = new Set<string>();
+    listeners = new globalThis.Map<
+      string,
+      Array<{ handler: MapEventHandler; once: boolean }>
+    >();
+    on = vi.fn((event: string, handler: MapEventHandler) => {
+      this.listeners.set(event, [
+        ...(this.listeners.get(event) ?? []),
+        { handler, once: false },
+      ]);
+      return this;
     });
-    getSource = vi.fn(() =>
-      sourceCreated ? { setData: setDataSpy } : undefined,
+    off = vi.fn((event: string, handler: MapEventHandler) => {
+      this.listeners.set(
+        event,
+        (this.listeners.get(event) ?? []).filter(
+          (entry) => entry.handler !== handler,
+        ),
+      );
+      return this;
+    });
+    once = vi.fn((event: string, handler: MapEventHandler) => {
+      this.listeners.set(event, [
+        ...(this.listeners.get(event) ?? []),
+        { handler, once: true },
+      ]);
+      return this;
+    });
+    emit(event: string, ...args: unknown[]) {
+      const current = [...(this.listeners.get(event) ?? [])];
+      this.listeners.set(
+        event,
+        (this.listeners.get(event) ?? []).filter(
+          (entry) => !current.includes(entry) || !entry.once,
+        ),
+      );
+      for (const entry of current) entry.handler(...args);
+    }
+    listenerCount(event: string) {
+      return this.listeners.get(event)?.length ?? 0;
+    }
+    addControl = vi.fn();
+    remove = vi.fn(() => this.listeners.clear());
+    isStyleLoaded = vi.fn(() => styleLoaded);
+    addSource = vi.fn((id: string, specification: { data?: unknown }) => {
+      this.sourceData.set(id, specification.data);
+      this.sources.set(id, {
+        setData: (data: unknown) => {
+          this.sourceData.set(id, data);
+          setDataSpy(data);
+        },
+      });
+      if (id === "routes" && unsettleStyleWhenRoutesSourceIsAdded) {
+        styleLoaded = false;
+      }
+    });
+    getSource = vi.fn((id: string) => this.sources.get(id));
+    addLayer = vi.fn((specification: { id: string }) => {
+      this.layers.add(specification.id);
+    });
+    getLayer = vi.fn((id: string) =>
+      this.layers.has(id) ? { id } : undefined,
     );
-    addLayer = vi.fn();
-    getLayer = vi.fn(() => undefined);
     setFeatureState = vi.fn();
     setPaintProperty = vi.fn();
     fitBounds = vi.fn();
     easeTo = vi.fn();
     jumpTo = vi.fn();
     getBounds = vi.fn();
+    queryRenderedFeatures = vi.fn(() => debugQueryFeatures);
     resize = vi.fn();
     getCanvas = vi.fn(() => ({ width: 800, height: 600 }));
     constructor(config?: { center?: [number, number]; zoom?: number }) {
       mapInstance = this as unknown as MockMap;
+      mapInstances.push(mapInstance);
       mapConstructorConfig = config;
     }
   }
@@ -104,6 +160,41 @@ function route(overrides: Partial<NormalizedRoute> = {}): NormalizedRoute {
   };
 }
 
+
+function debugResult(): CompareDebug {
+  return {
+    osrm: {
+      engine: "osrm",
+      status: "ok",
+      errors: [],
+      segments: [{
+        id: "osrm:0:0:0",
+        engine: "osrm",
+        routeId: "osrm:0",
+        routeIndex: 0,
+        legIndex: 0,
+        segmentIndex: 0,
+        coordinates: [[77.2, 28.6], [77.21, 28.61]],
+        properties: {},
+      }],
+    },
+    valhalla: {
+      engine: "valhalla",
+      status: "ok",
+      errors: [],
+      segments: [{
+        id: "valhalla:0:0:0",
+        engine: "valhalla",
+        routeId: "valhalla:0",
+        routeIndex: 0,
+        legIndex: 0,
+        segmentIndex: 0,
+        coordinates: [[77.2, 28.6], [77.21, 28.61]],
+        properties: {},
+      }],
+    },
+  } as unknown as CompareDebug;
+}
 /** The most recently constructed mock Map instance. */
 function lastMap(): MockMap {
   return mapInstance;
@@ -111,7 +202,9 @@ function lastMap(): MockMap {
 
 describe("MapView route rendering (Task 16)", () => {
   beforeEach(() => {
-    sourceCreated = false;
+    mapInstances = [];
+    unsettleStyleWhenRoutesSourceIsAdded = false;
+    debugQueryFeatures = [];
     styleLoaded = true;
     setDataSpy.mockClear();
     vi.clearAllMocks();
@@ -215,6 +308,119 @@ describe("MapView route rendering (Task 16)", () => {
     expect(setDataSpy).not.toHaveBeenCalled();
   });
 
+  it("restores pre-existing debug data after route setup unsettles a remounted style", async () => {
+    const debug = debugResult();
+    useStore.setState({
+      routes: [
+        route({ id: "osrm:0" }),
+        route({ id: "valhalla:0", engine: "valhalla" }),
+      ],
+      visibility: { "osrm:0": true, "valhalla:0": true },
+      edgeDebugEnabled: true,
+      debugResults: debug,
+      hoveredDebugSegmentIds: [],
+      pinnedDebugSegmentIds: [],
+    });
+    styleLoaded = false;
+    unsettleStyleWhenRoutesSourceIsAdded = true;
+
+    render(<MapView />);
+    const map = lastMap();
+    expect(map.getSource("routes")).toBeUndefined();
+    expect(map.getSource("route-debug-segments")).toBeUndefined();
+
+    // Both effects were waiting for the first idle. Route setup runs first and
+    // makes isStyleLoaded() transiently false before debug setup runs.
+    act(() => {
+      styleLoaded = true;
+      map.emit("idle");
+    });
+    expect(map.getSource("routes")).toBeDefined();
+    expect(map.getSource("route-debug-segments")).toBeUndefined();
+
+    // The debug effect must retain its data and schedule another settle pass.
+    act(() => {
+      styleLoaded = true;
+      map.emit("idle");
+    });
+
+    expect(map.getSource("route-debug-segments")).toBeDefined();
+    expect(map.sourceData.get("route-debug-segments")).toEqual(
+      expect.objectContaining({ features: expect.arrayContaining([
+        expect.objectContaining({
+          properties: expect.objectContaining({ debugSegmentId: "osrm:0:0:0" }),
+        }),
+        expect.objectContaining({
+          properties: expect.objectContaining({ debugSegmentId: "valhalla:0:0:0" }),
+        }),
+      ]) }),
+    );
+    expect(map.getLayer("route-debug-hit")).toBeDefined();
+    expect(map.getLayer("route-debug-highlight")).toBeDefined();
+    expect(map.listenerCount("mousemove")).toBe(1);
+    expect(map.listenerCount("mouseleave")).toBe(1);
+
+    // The listener is attached to this remounted map and queries its restored
+    // hit layer; hidden-route filtering still uses current store visibility.
+    debugQueryFeatures = [{
+      id: "osrm:0:0:0",
+      properties: {
+        debugSegmentId: "osrm:0:0:0",
+        routeId: "osrm:0",
+        engine: "osrm",
+      },
+    }];
+    await act(async () => {
+      map.emit("mousemove", {
+        point: { x: 20, y: 20 },
+        lngLat: { lng: 77.2, lat: 28.6 },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    });
+    expect(useStore.getState().hoveredDebugSegmentIds).toEqual(["osrm:0:0:0"]);
+
+    act(() => {
+      useStore.setState({ visibility: { "osrm:0": false, "valhalla:0": true } });
+    });
+    await act(async () => {
+      map.emit("mousemove", {
+        point: { x: 20, y: 20 },
+        lngLat: { lng: 77.2, lat: 28.6 },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    });
+    expect(useStore.getState().hoveredDebugSegmentIds).toEqual([]);
+  });
+
+  it("cleans old listeners and attaches one fresh set across repeated remounts", () => {
+    useStore.setState({
+      routes: [route()],
+      visibility: { "osrm:0": true },
+      edgeDebugEnabled: true,
+      debugResults: debugResult(),
+    });
+
+    const firstRender = render(<MapView />);
+    const firstMap = lastMap();
+    expect(firstMap.listenerCount("mousemove")).toBe(1);
+    firstRender.unmount();
+    expect(firstMap.listenerCount("mousemove")).toBe(0);
+    expect(firstMap.remove).toHaveBeenCalledOnce();
+
+    const secondRender = render(<MapView />);
+    const secondMap = lastMap();
+    expect(secondMap).not.toBe(firstMap);
+    expect(secondMap.listenerCount("mousemove")).toBe(1);
+    secondRender.unmount();
+    expect(secondMap.listenerCount("mousemove")).toBe(0);
+
+    render(<MapView />);
+    const thirdMap = lastMap();
+    expect(thirdMap).not.toBe(secondMap);
+    expect(thirdMap.listenerCount("mousemove")).toBe(1);
+    expect(mapInstances).toHaveLength(3);
+  });
+
   it("updates an existing debug source while the style is settling", () => {
     useStore.setState({
       edgeDebugEnabled: true,
@@ -262,7 +468,9 @@ describe("MapView route rendering (Task 16)", () => {
 
 describe("MapView fitting (Task 18.1, Req 20.1-20.3)", () => {
   beforeEach(() => {
-    sourceCreated = false;
+    mapInstances = [];
+    unsettleStyleWhenRoutesSourceIsAdded = false;
+    debugQueryFeatures = [];
     styleLoaded = true;
     setDataSpy.mockClear();
     vi.clearAllMocks();
@@ -456,7 +664,9 @@ describe("MapView fitting (Task 18.1, Req 20.1-20.3)", () => {
 
 describe("MapView initial view (Task 13.1, Req 20.5)", () => {
   beforeEach(() => {
-    sourceCreated = false;
+    mapInstances = [];
+    unsettleStyleWhenRoutesSourceIsAdded = false;
+    debugQueryFeatures = [];
     styleLoaded = true;
     setDataSpy.mockClear();
     mapConstructorConfig = undefined;

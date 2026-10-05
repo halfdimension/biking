@@ -17,6 +17,7 @@ import {
 } from "@testing-library/react";
 import App from "./App";
 import { useStore } from "./store";
+import type { CompareDebug, NormalizedRoute } from "./types";
 
 vi.mock("./api", () => ({
   API_BASE_URL: "http://localhost:8000",
@@ -173,6 +174,81 @@ describe("App layout shell", () => {
     expect(screen.getByTestId("bottom-tab-panel")).toHaveTextContent(
       /run Compare to assess routes/i,
     );
+  });
+
+  it("preserves comparison/debug state through repeated navigation without rerunning compare", async () => {
+    const preservedRoute: NormalizedRoute = {
+      id: "osrm:0",
+      engine: "osrm",
+      index: 0,
+      isPrimary: true,
+      label: "OSRM Primary",
+      coordinates: [[77.2, 28.6], [77.21, 28.61]],
+      distanceMeters: 100,
+      durationSeconds: 60,
+      cost: 10,
+      raw: {},
+    };
+    const preservedDebug = {
+      osrm: {
+        engine: "osrm",
+        status: "ok",
+        errors: [],
+        segments: [{
+          id: "osrm:0:0:0",
+          engine: "osrm",
+          routeId: "osrm:0",
+          routeIndex: 0,
+          legIndex: 0,
+          segmentIndex: 0,
+          coordinates: [[77.2, 28.6], [77.21, 28.61]],
+          properties: {},
+        }],
+      },
+      valhalla: { engine: "valhalla", status: "ok", errors: [], segments: [] },
+    } as unknown as CompareDebug;
+    useStore.setState({
+      routes: [preservedRoute],
+      visibility: { "osrm:0": true },
+      selectedRouteId: "osrm:0",
+      debugResults: preservedDebug,
+      edgeDebugEnabled: true,
+      compareStatus: "done",
+    });
+    await renderApp();
+    const navigation = screen.getByRole("navigation", { name: "Dashboard screens" });
+
+    for (let roundTrip = 0; roundTrip < 3; roundTrip += 1) {
+      fireEvent.click(within(navigation).getByRole("button", { name: "Trace Inspector" }));
+      fireEvent.click(within(navigation).getByRole("button", { name: "Route Comparison" }));
+    }
+
+    const state = useStore.getState();
+    expect(state.routes).toEqual([preservedRoute]);
+    expect(state.debugResults).toBe(preservedDebug);
+    expect(state.visibility).toEqual({ "osrm:0": true });
+    expect(state.selectedRouteId).toBe("osrm:0");
+    expect(state.edgeDebugEnabled).toBe(true);
+    expect(screen.getByRole("button", { name: "Edge Debug: ON" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(api.compare).not.toHaveBeenCalled();
+  });
+
+  it("keeps Edge Debug OFF through a navigation round trip", async () => {
+    useStore.setState({ edgeDebugEnabled: false });
+    await renderApp();
+    const navigation = screen.getByRole("navigation", { name: "Dashboard screens" });
+    fireEvent.click(within(navigation).getByRole("button", { name: "Trace Inspector" }));
+    fireEvent.click(within(navigation).getByRole("button", { name: "Route Comparison" }));
+
+    expect(useStore.getState().edgeDebugEnabled).toBe(false);
+    expect(screen.getByRole("button", { name: "Edge Debug: OFF" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    expect(api.compare).not.toHaveBeenCalled();
   });
 
   it("switches to Trace Inspector and back without a page reload", async () => {
