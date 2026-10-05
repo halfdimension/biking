@@ -32,6 +32,7 @@ import type {
   TestCase,
   ValhallaTraceResult,
 } from "./types";
+import type { MapCameraState } from "./map/camera";
 
 export type AppMode = "normal" | "advanced";
 export type MapClickTarget = "start" | "dest" | null;
@@ -118,6 +119,16 @@ export interface AppState {
   traceDetailsCollapsed: boolean;
   traceDetailsExpandedHeight: number;
   traceFitRequestId: number;
+
+  // Each screen owns a complete camera snapshot. The companion revision binds
+  // it to the result that produced it, preventing an old viewport from being
+  // restored over a genuinely new comparison/trace result.
+  routeComparisonCamera: MapCameraState | null;
+  routeComparisonCameraResultRevision: number | null;
+  comparisonResultRevision: number;
+  traceInspectorCamera: MapCameraState | null;
+  traceInspectorCameraResultRevision: number | null;
+  traceResultRevision: number;
 
   // Advanced/raw request results (Req 9.4–9.7). Isolated from Normal-mode
   // `results` / `compareStatus` so a raw send never affects a Normal Compare
@@ -231,6 +242,10 @@ export interface AppState {
   toggleTraceDetailsCollapsed: () => void;
   setTraceDetailsExpandedHeight: (height: number) => void;
   requestTraceFit: () => void;
+  setRouteComparisonCamera: (camera: MapCameraState) => void;
+  clearRouteComparisonCamera: () => void;
+  setTraceInspectorCamera: (camera: MapCameraState) => void;
+  clearTraceInspectorCamera: () => void;
 
   /** Send an exact OSRM URL verbatim through the raw path (Req 9.4, 9.5). */
   sendOsrmRaw: (url: string) => Promise<void>;
@@ -554,6 +569,12 @@ export const useStore = create<AppState>((set, get) => ({
   traceDetailsCollapsed: false,
   traceDetailsExpandedHeight: 180,
   traceFitRequestId: 0,
+  routeComparisonCamera: null,
+  routeComparisonCameraResultRevision: null,
+  comparisonResultRevision: 0,
+  traceInspectorCamera: null,
+  traceInspectorCameraResultRevision: null,
+  traceResultRevision: 0,
 
   osrmRawState: IDLE_RAW,
   valhallaRawState: IDLE_RAW,
@@ -651,6 +672,7 @@ export const useStore = create<AppState>((set, get) => ({
         selectedRouteId,
         debugResults: edgeDebugEnabled ? (results.debug ?? null) : null,
         compareStatus: "done",
+        comparisonResultRevision: previous.comparisonResultRevision + 1,
         lastError: null,
         traceSourceRouteId: nextTraceSourceId,
         ...(keepTrace
@@ -665,6 +687,7 @@ export const useStore = create<AppState>((set, get) => ({
               tracePinnedSegmentIds: [],
               tracePinnedPoint: null,
               traceInspectorPinned: false,
+              traceResultRevision: previous.traceResultRevision + 1,
             }),
       });
     } catch (err) {
@@ -732,7 +755,8 @@ export const useStore = create<AppState>((set, get) => ({
     }),
 
   setTraceSourceRouteId: (routeId) => {
-    if (get().traceSourceRouteId === routeId) return;
+    const previous = get();
+    if (previous.traceSourceRouteId === routeId) return;
     set({
       traceSourceRouteId: routeId,
       traceSourceEncodedPolyline: null,
@@ -744,6 +768,7 @@ export const useStore = create<AppState>((set, get) => ({
       tracePinnedSegmentIds: [],
       tracePinnedPoint: null,
       traceInspectorPinned: false,
+      traceResultRevision: previous.traceResultRevision + 1,
     });
   },
 
@@ -787,6 +812,7 @@ export const useStore = create<AppState>((set, get) => ({
       set({
         traceStatus: failed ? "error" : "done",
         traceResult: result,
+        traceResultRevision: get().traceResultRevision + 1,
         traceError: failed
           ? (result.errors[0]?.message ?? "Valhalla trace failed.")
           : null,
@@ -846,6 +872,30 @@ export const useStore = create<AppState>((set, get) => ({
 
   requestTraceFit: () =>
     set((state) => ({ traceFitRequestId: state.traceFitRequestId + 1 })),
+
+  setRouteComparisonCamera: (camera) =>
+    set((state) => ({
+      routeComparisonCamera: camera,
+      routeComparisonCameraResultRevision: state.comparisonResultRevision,
+    })),
+
+  clearRouteComparisonCamera: () =>
+    set({
+      routeComparisonCamera: null,
+      routeComparisonCameraResultRevision: null,
+    }),
+
+  setTraceInspectorCamera: (camera) =>
+    set((state) => ({
+      traceInspectorCamera: camera,
+      traceInspectorCameraResultRevision: state.traceResultRevision,
+    })),
+
+  clearTraceInspectorCamera: () =>
+    set({
+      traceInspectorCamera: null,
+      traceInspectorCameraResultRevision: null,
+    }),
 
   sendOsrmRaw: async (url) => {
     set({ osrmRawState: { status: "loading", result: null, error: null } });

@@ -1,4 +1,4 @@
-import { act, render } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import TraceMap, {
   buildTraceRoutesFeatureCollection,
@@ -24,11 +24,39 @@ class MockMap {
   listeners = new Map<string, Set<(...args: unknown[]) => void>>();
   sources = new Map<string, MockSource>();
   layers = new Map<string, unknown>();
+  camera = {
+    center: [77.209, 28.6139] as [number, number],
+    zoom: 10,
+    bearing: 0,
+    pitch: 0,
+  };
   addControl = vi.fn();
   remove = vi.fn();
   resize = vi.fn();
   fitBounds = vi.fn();
-  easeTo = vi.fn();
+  easeTo = vi.fn((options: {
+    center?: [number, number]; zoom?: number; bearing?: number; pitch?: number;
+  }) => {
+    if (options.center) this.camera.center = options.center;
+    if (options.zoom !== undefined) this.camera.zoom = options.zoom;
+    if (options.bearing !== undefined) this.camera.bearing = options.bearing;
+    if (options.pitch !== undefined) this.camera.pitch = options.pitch;
+  });
+  jumpTo = vi.fn((options: {
+    center?: [number, number]; zoom?: number; bearing?: number; pitch?: number;
+  }) => {
+    if (options.center) this.camera.center = options.center;
+    if (options.zoom !== undefined) this.camera.zoom = options.zoom;
+    if (options.bearing !== undefined) this.camera.bearing = options.bearing;
+    if (options.pitch !== undefined) this.camera.pitch = options.pitch;
+  });
+  getCenter = vi.fn(() => ({
+    lng: this.camera.center[0],
+    lat: this.camera.center[1],
+  }));
+  getZoom = vi.fn(() => this.camera.zoom);
+  getBearing = vi.fn(() => this.camera.bearing);
+  getPitch = vi.fn(() => this.camera.pitch);
   setFeatureState = vi.fn();
   queryRenderedFeatures = vi.fn(() => []);
   getCanvas = vi.fn(() => ({ width: 900, height: 500 }));
@@ -36,6 +64,10 @@ class MockMap {
 
   constructor(public config: { container: HTMLElement; style?: unknown; center?: unknown; zoom?: number }) {
     constructorConfig = config;
+    if (Array.isArray(config.center)) {
+      this.camera.center = config.center as [number, number];
+    }
+    if (config.zoom !== undefined) this.camera.zoom = config.zoom;
     instances.push(this);
   }
 
@@ -133,6 +165,12 @@ function resetStore(result: ValhallaTraceResult | null = null) {
     traceHoveredSegmentIds: [],
     tracePinnedSegmentIds: [],
     traceFitRequestId: 0,
+    traceResultRevision: 0,
+    traceInspectorCamera: null,
+    traceInspectorCameraResultRevision: null,
+    routeComparisonCamera: null,
+    routeComparisonCameraResultRevision: null,
+    comparisonResultRevision: 0,
   });
 }
 
@@ -276,5 +314,115 @@ describe("TraceMap rendering lifecycle", () => {
     expect(instances[1].resize).toHaveBeenCalled();
     second.unmount();
     expect(instances[1].remove).toHaveBeenCalled();
+  });
+});
+
+describe("TraceMap camera persistence", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    instances.length = 0;
+    styleLoaded = true;
+    resetStore(traceResult([[77, 28], [77.1, 28.1]]));
+  });
+
+  it("restores the exact settled trace camera on a same-result remount", () => {
+    useStore.setState({ traceResultRevision: 5 });
+    const route = sourceRoute();
+    const first = render(<TraceMap sourceRoute={route} />);
+    const firstMap = instances[0];
+    const customCamera = {
+      center: [77.081234, 28.041234] as [number, number],
+      zoom: 17.125,
+      bearing: 22,
+      pitch: 37,
+    };
+
+    firstMap.camera = { ...customCamera };
+    act(() => firstMap.emit("moveend"));
+    expect(useStore.getState().traceInspectorCamera).toEqual(customCamera);
+    first.unmount();
+
+    render(<TraceMap sourceRoute={route} />);
+    const restoredMap = instances[1];
+    expect(restoredMap.jumpTo).toHaveBeenCalledWith(customCamera);
+    expect(restoredMap.fitBounds).not.toHaveBeenCalled();
+  });
+
+  it("fits a new trace result once instead of restoring the old trace camera", () => {
+    useStore.setState({
+      traceResultRevision: 6,
+      traceInspectorCameraResultRevision: 5,
+      traceInspectorCamera: {
+        center: [10, 20],
+        zoom: 18,
+        bearing: -25,
+        pitch: 50,
+      },
+    });
+
+    render(<TraceMap sourceRoute={sourceRoute()} />);
+    const map = instances[0];
+    expect(map.jumpTo).not.toHaveBeenCalled();
+    expect(map.fitBounds).toHaveBeenCalledOnce();
+  });
+
+  it("persists an explicit Fit Routes camera and drawer resize leaves it unchanged", () => {
+    const saved = {
+      center: [77.05, 28.05] as [number, number],
+      zoom: 14,
+      bearing: 0,
+      pitch: 0,
+    };
+    useStore.setState({
+      traceResultRevision: 3,
+      traceInspectorCameraResultRevision: 3,
+      traceInspectorCamera: saved,
+    });
+    const view = render(<TraceMap sourceRoute={sourceRoute()} />);
+    const map = instances[0];
+
+    act(() => useStore.getState().requestTraceFit());
+    expect(map.fitBounds).toHaveBeenCalledOnce();
+    const fitted = {
+      center: [77.06, 28.06] as [number, number],
+      zoom: 15.5,
+      bearing: 3,
+      pitch: 12,
+    };
+    act(() => {
+      map.camera = { ...fitted };
+      map.emit("moveend");
+    });
+    expect(useStore.getState().traceInspectorCamera).toEqual(fitted);
+
+    view.rerender(
+      <TraceMap sourceRoute={sourceRoute()} compactDetails layoutRevision={1} />,
+    );
+    expect(map.resize).toHaveBeenCalled();
+    expect(useStore.getState().traceInspectorCamera).toEqual(fitted);
+  });
+
+  it("restores pitch/bearing and persists a 2D reset", () => {
+    useStore.setState({
+      traceResultRevision: 8,
+      traceInspectorCameraResultRevision: 8,
+      traceInspectorCamera: {
+        center: [77.2, 28.6],
+        zoom: 16,
+        bearing: -18,
+        pitch: 48,
+      },
+    });
+    render(<TraceMap sourceRoute={sourceRoute()} />);
+    const map = instances[0];
+    expect(map.jumpTo).toHaveBeenCalledWith(
+      expect.objectContaining({ pitch: 48, bearing: -18 }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "2D view" }));
+    act(() => map.emit("moveend"));
+    expect(useStore.getState().traceInspectorCamera).toEqual(
+      expect.objectContaining({ pitch: 0, bearing: 0 }),
+    );
   });
 });

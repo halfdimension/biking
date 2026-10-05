@@ -60,6 +60,7 @@ import {
   computeBounds,
   markerCoords,
 } from "../map/fit";
+import { readMapCamera, restoreMapCamera } from "../map/camera";
 import type { Coordinate, NormalizedRoute } from "../types";
 
 /** Distinct marker colors (Req 1.7): green start, red destination. */
@@ -217,6 +218,7 @@ export default function MapView() {
   const startMarkerRef = useRef<maplibregl.Marker | null>(null);
   const destMarkerRef = useRef<maplibregl.Marker | null>(null);
   const previousActiveDebugIdsRef = useRef<string[]>([]);
+  const pendingResultFitRef = useRef(false);
 
   const start = useStore((s) => s.start);
   const dest = useStore((s) => s.dest);
@@ -239,6 +241,9 @@ export default function MapView() {
   // manual "Fit Routes" control.
   const compareStatus = useStore((s) => s.compareStatus);
   const fitRequestId = useStore((s) => s.fitRequestId);
+  const comparisonResultRevision = useStore(
+    (s) => s.comparisonResultRevision,
+  );
 
   // Layout collapse booleans (UI-only). MapView subscribes to them purely to
   // trigger a `map.resize()` after the sibling panels change size — the map
@@ -249,7 +254,17 @@ export default function MapView() {
   const bottomCollapsed = useStore((s) => s.bottomCollapsed);
 
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
-  const [tilted, setTilted] = useState(false);
+  const [tilted, setTilted] = useState(() => {
+    const state = useStore.getState();
+    return (
+      state.routeComparisonCameraResultRevision ===
+        state.comparisonResultRevision &&
+      Boolean(
+        state.routeComparisonCamera?.pitch ||
+          state.routeComparisonCamera?.bearing,
+      )
+    );
+  });
 
   // --- Map initialization (Task 13.1) --------------------------------------
   useEffect(() => {
@@ -281,6 +296,30 @@ export default function MapView() {
       container,
       "MapView",
     );
+
+    const saveCamera = (updateTiltButton: boolean) => {
+      const camera = readMapCamera(map);
+      if (!camera) return;
+      pendingResultFitRef.current = false;
+      useStore.getState().setRouteComparisonCamera(camera);
+      if (updateTiltButton) {
+        setTilted(camera.pitch !== 0 || camera.bearing !== 0);
+      }
+    };
+    const handleMoveEnd = () => saveCamera(true);
+    map.on("moveend", handleMoveEnd);
+
+    // A camera is valid only for the same successful comparison revision. A
+    // mismatched snapshot belongs to an older result and the result-fit effect
+    // below is allowed to take precedence.
+    const cameraState = useStore.getState();
+    if (
+      cameraState.routeComparisonCamera &&
+      cameraState.routeComparisonCameraResultRevision ===
+        cameraState.comparisonResultRevision
+    ) {
+      restoreMapCamera(map, cameraState.routeComparisonCamera);
+    }
 
     let debugMoveFrame: number | null = null;
 
@@ -366,6 +405,10 @@ export default function MapView() {
     map.on("contextmenu", handleContextMenu);
 
     return () => {
+      if (!pendingResultFitRef.current) {
+        saveCamera(false);
+      }
+      map.off("moveend", handleMoveEnd);
       detachMapLifecycle();
       if (debugMoveFrame !== null) cancelAnimationFrame(debugMoveFrame);
       map.off("mousemove", handleMouseMove);
@@ -655,8 +698,18 @@ export default function MapView() {
     if (!map) return;
     if (compareStatus !== "done") return;
     if (routes.length === 0) return;
-    fitTo(map, collectRouteCoords(routes));
-  }, [compareStatus, routes]);
+    const state = useStore.getState();
+    if (
+      state.routeComparisonCamera &&
+      state.routeComparisonCameraResultRevision === comparisonResultRevision
+    ) {
+      return;
+    }
+    const coords = collectRouteCoords(routes);
+    if (coords.length === 0) return;
+    pendingResultFitRef.current = true;
+    fitTo(map, coords);
+  }, [compareStatus, comparisonResultRevision, routes]);
 
   // --- Manual "Fit Routes" (Task 18.1, Req 20.2, 20.3) ---------------------
   // Runs whenever `fitRequestId` increments. Fits to the routes when present,
@@ -673,6 +726,8 @@ export default function MapView() {
       routes.length > 0
         ? collectRouteCoords(routes)
         : markerCoords(start, dest);
+    if (coords.length === 0) return;
+    pendingResultFitRef.current = true;
     fitTo(map, coords);
   }, [fitRequestId, routes, start, dest]);
 

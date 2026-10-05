@@ -111,6 +111,12 @@ function resetStore() {
     health: { osrm: "unknown", valhalla: "unknown" },
     compareStatus: "idle",
     lastError: null,
+    comparisonResultRevision: 0,
+    routeComparisonCamera: null,
+    routeComparisonCameraResultRevision: null,
+    traceResultRevision: 0,
+    traceInspectorCamera: null,
+    traceInspectorCameraResultRevision: null,
   });
 }
 
@@ -144,6 +150,7 @@ describe("store", () => {
       );
       expect(state.routes.map((r) => r.id)).toEqual(ALL_IDS);
       expect(state.compareStatus).toBe("done");
+      expect(state.comparisonResultRevision).toBe(1);
       expect(state.lastError).toBeNull();
       // Visibility all true for exactly the returned ids.
       expect(Object.keys(state.visibility).sort()).toEqual([...ALL_IDS].sort());

@@ -34,6 +34,12 @@ interface MockMap {
   getBounds: ReturnType<typeof vi.fn>;
   queryRenderedFeatures: ReturnType<typeof vi.fn>;
   remove: ReturnType<typeof vi.fn>;
+  camera: {
+    center: [number, number];
+    zoom: number;
+    bearing: number;
+    pitch: number;
+  };
   sourceData: globalThis.Map<string, unknown>;
   emit: (event: string, ...args: unknown[]) => void;
   listenerCount: (event: string) => number;
@@ -52,6 +58,12 @@ vi.mock("maplibre-gl", () => {
       string,
       Array<{ handler: MapEventHandler; once: boolean }>
     >();
+    camera = {
+      center: [77.209, 28.6139] as [number, number],
+      zoom: 10,
+      bearing: 0,
+      pitch: 0,
+    };
     on = vi.fn((event: string, handler: MapEventHandler) => {
       this.listeners.set(event, [
         ...(this.listeners.get(event) ?? []),
@@ -113,14 +125,37 @@ vi.mock("maplibre-gl", () => {
     setFeatureState = vi.fn();
     setPaintProperty = vi.fn();
     fitBounds = vi.fn();
-    easeTo = vi.fn();
-    jumpTo = vi.fn();
+    easeTo = vi.fn((options: {
+      center?: [number, number]; zoom?: number; bearing?: number; pitch?: number;
+    }) => {
+      if (options.center) this.camera.center = options.center;
+      if (options.zoom !== undefined) this.camera.zoom = options.zoom;
+      if (options.bearing !== undefined) this.camera.bearing = options.bearing;
+      if (options.pitch !== undefined) this.camera.pitch = options.pitch;
+    });
+    jumpTo = vi.fn((options: {
+      center?: [number, number]; zoom?: number; bearing?: number; pitch?: number;
+    }) => {
+      if (options.center) this.camera.center = options.center;
+      if (options.zoom !== undefined) this.camera.zoom = options.zoom;
+      if (options.bearing !== undefined) this.camera.bearing = options.bearing;
+      if (options.pitch !== undefined) this.camera.pitch = options.pitch;
+    });
+    getCenter = vi.fn(() => ({
+      lng: this.camera.center[0],
+      lat: this.camera.center[1],
+    }));
+    getZoom = vi.fn(() => this.camera.zoom);
+    getBearing = vi.fn(() => this.camera.bearing);
+    getPitch = vi.fn(() => this.camera.pitch);
     getBounds = vi.fn();
     queryRenderedFeatures = vi.fn(() => debugQueryFeatures);
     resize = vi.fn();
     getCanvas = vi.fn(() => ({ width: 800, height: 600 }));
     constructor(config?: { center?: [number, number]; zoom?: number }) {
       mapInstance = this as unknown as MockMap;
+      if (config?.center) this.camera.center = config.center;
+      if (config?.zoom !== undefined) this.camera.zoom = config.zoom;
       mapInstances.push(mapInstance);
       mapConstructorConfig = config;
     }
@@ -217,6 +252,10 @@ describe("MapView route rendering (Task 16)", () => {
       dest: null,
       compareStatus: "idle",
       fitRequestId: 0,
+      routeComparisonCamera: null,
+      routeComparisonCameraResultRevision: null,
+      comparisonResultRevision: 0,
+      traceInspectorCamera: null,
     });
   });
 
@@ -482,6 +521,9 @@ describe("MapView fitting (Task 18.1, Req 20.1-20.3)", () => {
       dest: null,
       compareStatus: "idle",
       fitRequestId: 0,
+      routeComparisonCamera: null,
+      routeComparisonCameraResultRevision: null,
+      comparisonResultRevision: 0,
     });
   });
 
@@ -679,6 +721,9 @@ describe("MapView initial view (Task 13.1, Req 20.5)", () => {
       dest: null,
       compareStatus: "idle",
       fitRequestId: 0,
+      routeComparisonCamera: null,
+      routeComparisonCameraResultRevision: null,
+      comparisonResultRevision: 0,
     });
   });
 
@@ -714,5 +759,145 @@ describe("MapView initial view (Task 13.1, Req 20.5)", () => {
     expect(map.easeTo).toHaveBeenLastCalledWith(
       expect.objectContaining({ pitch: 0, bearing: 0 }),
     );
+  });
+});
+
+describe("MapView camera persistence", () => {
+  beforeEach(() => {
+    mapInstances = [];
+    styleLoaded = true;
+    vi.clearAllMocks();
+    useStore.setState({
+      routes: [],
+      visibility: {},
+      selectedRouteId: null,
+      start: null,
+      dest: null,
+      compareStatus: "idle",
+      fitRequestId: 0,
+      comparisonResultRevision: 0,
+      routeComparisonCamera: null,
+      routeComparisonCameraResultRevision: null,
+      traceInspectorCamera: null,
+      traceInspectorCameraResultRevision: null,
+      traceResultRevision: 0,
+    });
+  });
+
+  it("restores the exact settled camera on a same-result remount without refitting", () => {
+    useStore.setState({
+      routes: [route()],
+      visibility: { "osrm:0": true },
+      compareStatus: "done",
+      comparisonResultRevision: 7,
+    });
+    const first = render(<MapView />);
+    const firstMap = lastMap();
+    const customCamera = {
+      center: [77.321234, 28.612345] as [number, number],
+      zoom: 16.75,
+      bearing: -18,
+      pitch: 48,
+    };
+
+    firstMap.camera = { ...customCamera };
+    act(() => firstMap.emit("moveend"));
+    expect(useStore.getState().routeComparisonCamera).toEqual(customCamera);
+    first.unmount();
+
+    render(<MapView />);
+    const restoredMap = lastMap();
+    expect(restoredMap.jumpTo).toHaveBeenCalledWith(customCamera);
+    expect(restoredMap.fitBounds).not.toHaveBeenCalled();
+  });
+
+  it("fits a new comparison once instead of restoring the previous result camera", () => {
+    useStore.setState({
+      routes: [route()],
+      visibility: { "osrm:0": true },
+      compareStatus: "done",
+      comparisonResultRevision: 2,
+      routeComparisonCamera: {
+        center: [12, 13],
+        zoom: 17,
+        bearing: 30,
+        pitch: 40,
+      },
+      routeComparisonCameraResultRevision: 1,
+    });
+
+    render(<MapView />);
+    const map = lastMap();
+    expect(map.jumpTo).not.toHaveBeenCalled();
+    expect(map.fitBounds).toHaveBeenCalledOnce();
+  });
+
+  it("persists the resulting camera after Fit Routes and keeps it through resize", () => {
+    useStore.setState({
+      routes: [route()],
+      visibility: { "osrm:0": true },
+      compareStatus: "done",
+      comparisonResultRevision: 3,
+    });
+    render(<MapView />);
+    const map = lastMap();
+    act(() => {
+      map.camera = {
+        center: [77.4, 28.7],
+        zoom: 12.5,
+        bearing: 4,
+        pitch: 9,
+      };
+      map.emit("moveend");
+      useStore.getState().requestFit();
+    });
+    expect(map.fitBounds).toHaveBeenCalled();
+
+    const fittedCamera = {
+      center: [77.62, 12.93] as [number, number],
+      zoom: 13.25,
+      bearing: 0,
+      pitch: 9,
+    };
+    act(() => {
+      map.camera = { ...fittedCamera };
+      map.emit("moveend");
+    });
+    expect(useStore.getState().routeComparisonCamera).toEqual(fittedCamera);
+
+    act(() => useStore.getState().toggleLeftCollapsed());
+    expect(useStore.getState().routeComparisonCamera).toEqual(fittedCamera);
+  });
+
+  it("persists pitch and bearing reset by the 2D control", () => {
+    useStore.setState({
+      comparisonResultRevision: 4,
+      routeComparisonCameraResultRevision: 4,
+      routeComparisonCamera: {
+        center: [77.2, 28.6],
+        zoom: 15,
+        bearing: -18,
+        pitch: 48,
+      },
+    });
+    render(<MapView />);
+    const map = lastMap();
+
+    fireEvent.click(screen.getByRole("button", { name: "2D view" }));
+    act(() => map.emit("moveend"));
+
+    expect(useStore.getState().routeComparisonCamera).toEqual(
+      expect.objectContaining({ pitch: 0, bearing: 0 }),
+    );
+  });
+
+  it("keeps comparison and trace cameras completely independent", () => {
+    const comparison = { center: [1, 2] as [number, number], zoom: 3, bearing: 4, pitch: 5 };
+    const trace = { center: [6, 7] as [number, number], zoom: 8, bearing: 9, pitch: 10 };
+    useStore.getState().setRouteComparisonCamera(comparison);
+    expect(useStore.getState().traceInspectorCamera).toBeNull();
+    useStore.getState().setTraceInspectorCamera(trace);
+    expect(useStore.getState().routeComparisonCamera).toEqual(comparison);
+    expect(useStore.getState().traceInspectorCamera).toEqual(trace);
   });
 });

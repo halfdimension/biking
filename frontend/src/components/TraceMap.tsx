@@ -8,6 +8,7 @@ import {
   dashboardMapOptions,
 } from "../map/initialize";
 import { computeBounds } from "../map/fit";
+import { readMapCamera, restoreMapCamera } from "../map/camera";
 import {
   buildDebugSegmentsFeatureCollection,
 } from "../map/debugSegments";
@@ -78,7 +79,8 @@ export default function TraceMap({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const previousActiveIds = useRef<string[]>([]);
-  const [tilted, setTilted] = useState(false);
+  const pendingResultFitRef = useRef(false);
+  const handledTraceRevisionRef = useRef<number | null>(null);
 
   const result = useStore((state) => state.traceResult);
   const hoveredIds = useStore((state) => state.traceHoveredSegmentIds);
@@ -86,6 +88,18 @@ export default function TraceMap({
   const fitRequestId = useStore((state) => state.traceFitRequestId);
   const setHovered = useStore((state) => state.setTraceHoveredSegmentIds);
   const pinHovered = useStore((state) => state.pinTraceHoveredSegments);
+  const traceResultRevision = useStore((state) => state.traceResultRevision);
+
+  const [tilted, setTilted] = useState(() => {
+    const state = useStore.getState();
+    return (
+      state.traceInspectorCameraResultRevision === state.traceResultRevision &&
+      Boolean(
+        state.traceInspectorCamera?.pitch ||
+          state.traceInspectorCamera?.bearing,
+      )
+    );
+  });
 
   const traceRouteId = sourceRoute ? `trace:${sourceRoute.id}` : "trace:none";
   const usableResult =
@@ -131,6 +145,27 @@ export default function TraceMap({
       "TraceMap",
     );
 
+    const saveCamera = (updateTiltButton: boolean) => {
+      const camera = readMapCamera(map);
+      if (!camera) return;
+      pendingResultFitRef.current = false;
+      useStore.getState().setTraceInspectorCamera(camera);
+      if (updateTiltButton) {
+        setTilted(camera.pitch !== 0 || camera.bearing !== 0);
+      }
+    };
+    const handleMoveEnd = () => saveCamera(true);
+    map.on("moveend", handleMoveEnd);
+
+    const cameraState = useStore.getState();
+    if (
+      cameraState.traceInspectorCamera &&
+      cameraState.traceInspectorCameraResultRevision ===
+        cameraState.traceResultRevision
+    ) {
+      restoreMapCamera(map, cameraState.traceInspectorCamera);
+    }
+
     let hoverFrame: number | null = null;
     const onMove = (event: maplibregl.MapMouseEvent) => {
       if (hoverFrame !== null) cancelAnimationFrame(hoverFrame);
@@ -171,6 +206,10 @@ export default function TraceMap({
       if (hoverFrame !== null) cancelAnimationFrame(hoverFrame);
       map.off("mousemove", onMove);
       map.off("mouseleave", onLeave);
+      if (!pendingResultFitRef.current) {
+        saveCamera(false);
+      }
+      map.off("moveend", handleMoveEnd);
       map.off("click", onClick);
       map.remove();
       mapRef.current = null;
@@ -256,7 +295,6 @@ export default function TraceMap({
           },
         } as maplibregl.LayerSpecification);
       }
-      fitTraceMap(map, sourceRoute, usableResult?.traceGeometry);
     };
 
     map.on("style.load", apply);
@@ -271,6 +309,30 @@ export default function TraceMap({
       map.off?.("idle", apply);
     };
   }, [sourceRoute, usableResult]);
+
+  // A new source/result revision fits once. A navigation remount with the same
+  // revision restores its saved camera in the initialization effect instead.
+  useEffect(() => {
+    if (handledTraceRevisionRef.current === traceResultRevision) return;
+    handledTraceRevisionRef.current = traceResultRevision;
+
+    const map = mapRef.current;
+    if (!map) return;
+    const state = useStore.getState();
+    if (
+      state.traceInspectorCamera &&
+      state.traceInspectorCameraResultRevision === traceResultRevision
+    ) {
+      return;
+    }
+    const coordinates = [
+      ...(sourceRoute?.coordinates ?? []),
+      ...(usableResult?.traceGeometry ?? []),
+    ];
+    if (coordinates.length === 0) return;
+    pendingResultFitRef.current = true;
+    fitTraceMap(map, sourceRoute, usableResult?.traceGeometry);
+  }, [sourceRoute, traceResultRevision, usableResult]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -371,16 +433,8 @@ export default function TraceMap({
     const map = mapRef.current;
     if (!map) return;
     map.resize();
-    const apply = () =>
-      fitTraceMap(map, sourceRoute, usableResult?.traceGeometry);
-    if (map.isStyleLoaded?.()) {
-      apply();
-      return;
-    }
-    map.once?.("style.load", apply);
-    return () => {
-      map.off?.("style.load", apply);
-    };
+    pendingResultFitRef.current = true;
+    fitTraceMap(map, sourceRoute, usableResult?.traceGeometry);
   }, [fitRequestId, sourceRoute, usableResult]);
 
   // The drawer changes the map row over a short CSS transition. Resize once

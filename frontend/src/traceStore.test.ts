@@ -80,6 +80,12 @@ describe("Trace Inspector store isolation", () => {
       traceError: null,
       tracePinnedSegmentIds: ["trace:osrm:0:0"],
       traceInspectorPinned: true,
+      comparisonResultRevision: 0,
+      routeComparisonCamera: null,
+      routeComparisonCameraResultRevision: null,
+      traceResultRevision: 0,
+      traceInspectorCamera: null,
+      traceInspectorCameraResultRevision: null,
     });
   });
 
@@ -102,5 +108,18 @@ describe("Trace Inspector store isolation", () => {
 
     expect(useStore.getState().traceResult).toBe(oldTrace);
     expect(useStore.getState().traceStatus).toBe("done");
+  });
+
+  it("advances trace identity only when an explicit trace returns", async () => {
+    vi.mocked(api.compare).mockResolvedValue(response("old-geometry"));
+    vi.mocked(api.valhallaTrace).mockResolvedValue(oldTrace);
+    await useStore.getState().runCompare();
+    expect(useStore.getState().traceResultRevision).toBe(0);
+
+    await useStore.getState().runValhallaTrace();
+
+    expect(api.valhallaTrace).toHaveBeenCalledOnce();
+    expect(useStore.getState().traceResultRevision).toBe(1);
+    expect(useStore.getState().traceResult).toBe(oldTrace);
   });
 });

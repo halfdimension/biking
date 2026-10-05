@@ -25,6 +25,7 @@ vi.mock("./api", () => ({
   osrmRaw: vi.fn(),
   valhallaRaw: vi.fn(),
   curlImport: vi.fn(),
+  valhallaTrace: vi.fn(),
   health: vi.fn().mockResolvedValue({ osrm: "unknown", valhalla: "unknown" }),
 }));
 
@@ -234,6 +235,7 @@ describe("App layout shell", () => {
       "true",
     );
     expect(api.compare).not.toHaveBeenCalled();
+    expect(api.valhallaTrace).not.toHaveBeenCalled();
   });
 
   it("keeps Edge Debug OFF through a navigation round trip", async () => {
