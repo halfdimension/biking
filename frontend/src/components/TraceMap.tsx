@@ -12,10 +12,16 @@ import { readMapCamera, restoreMapCamera } from "../map/camera";
 import {
   buildDebugSegmentsFeatureCollection,
 } from "../map/debugSegments";
+import { buildAnalysisMatchesFeatureCollection } from "../map/analysisMatches";
+import { buildAnalysisFocusFeatureCollection } from "../map/analysisFocus";
 import {
   debugHighlightLayerSpec,
   debugHitLayerSpec,
   DEBUG_HIT_LAYER_ID,
+  analysisMatchGlowLayerSpec,
+  analysisMatchLayerSpec,
+  analysisFocusGlowLayerSpec,
+  analysisFocusLayerSpec,
 } from "../map/layers";
 import {
   resolveDebugSegmentIds,
@@ -25,6 +31,12 @@ import EdgeDebugInspector from "./EdgeDebugInspector";
 
 const TRACE_ROUTES_SOURCE = "trace-inspector-routes";
 const TRACE_DEBUG_SOURCE = "trace-inspector-debug";
+export const TRACE_ANALYSIS_MATCHES_SOURCE = "trace-analysis-matches";
+export const TRACE_ANALYSIS_FOCUS_SOURCE = "trace-analysis-focus";
+export const TRACE_ANALYSIS_MATCHES_GLOW_LAYER = "trace-analysis-matches-glow";
+export const TRACE_ANALYSIS_MATCHES_LAYER = "trace-analysis-matches-line";
+export const TRACE_ANALYSIS_FOCUS_GLOW_LAYER = "trace-analysis-focus-glow";
+export const TRACE_ANALYSIS_FOCUS_LAYER = "trace-analysis-focus-line";
 
 export function buildTraceRoutesFeatureCollection(
   source: NormalizedRoute | undefined,
@@ -89,6 +101,12 @@ export default function TraceMap({
   const setHovered = useStore((state) => state.setTraceHoveredSegmentIds);
   const pinHovered = useStore((state) => state.pinTraceHoveredSegments);
   const traceResultRevision = useStore((state) => state.traceResultRevision);
+  const traceAnalysisExecutedSearch = useStore(
+    (state) => state.traceAnalysisExecutedSearch,
+  );
+  const traceAnalysisFocusedSegmentId = useStore(
+    (state) => state.traceAnalysisFocusedSegmentId,
+  );
 
   const [tilted, setTilted] = useState(() => {
     const state = useStore.getState();
@@ -112,6 +130,13 @@ export default function TraceMap({
         : "Valhalla map-match",
     }),
     [sourceRoute, traceRouteId],
+  );
+  const debugSegmentLookup = useMemo(
+    () =>
+      new Map(
+        (usableResult?.segments ?? []).map((segment) => [segment.id, segment]),
+      ),
+    [usableResult],
   );
   const debug = useMemo<CompareDebug | null>(
     () =>
@@ -333,6 +358,186 @@ export default function TraceMap({
     pendingResultFitRef.current = true;
     fitTraceMap(map, sourceRoute, usableResult?.traceGeometry);
   }, [sourceRoute, traceResultRevision, usableResult]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    let waitingForIdle = false;
+    const handleIdle = () => {
+      waitingForIdle = false;
+      apply();
+    };
+    const scheduleWhenStyleSettles = () => {
+      if (waitingForIdle || !map.once) return;
+      waitingForIdle = true;
+      map.once("idle", handleIdle);
+    };
+
+    const apply = () => {
+      const search =
+        traceAnalysisExecutedSearch?.traceResultRevision === traceResultRevision &&
+        traceAnalysisExecutedSearch.routeId === traceRouteId
+          ? traceAnalysisExecutedSearch
+          : null;
+      const existing = map.getSource(TRACE_ANALYSIS_MATCHES_SOURCE) as
+        | maplibregl.GeoJSONSource
+        | undefined;
+      if (!search && !existing) return;
+
+      const styleWasReady = Boolean(map.isStyleLoaded?.());
+      const data = buildAnalysisMatchesFeatureCollection(
+        search?.routeId ?? null,
+        search?.result ?? null,
+        Boolean(search),
+      );
+      if (existing) {
+        existing.setData(data as unknown as GeoJSON.FeatureCollection);
+      } else {
+        if (!styleWasReady) {
+          scheduleWhenStyleSettles();
+          return;
+        }
+        map.addSource(TRACE_ANALYSIS_MATCHES_SOURCE, {
+          type: "geojson",
+          promoteId: "debugSegmentId",
+          data: data as unknown as GeoJSON.FeatureCollection,
+        });
+      }
+      if (!styleWasReady) {
+        scheduleWhenStyleSettles();
+        return;
+      }
+
+      const beforeFocusOrDebug = map.getLayer(TRACE_ANALYSIS_FOCUS_GLOW_LAYER)
+        ? TRACE_ANALYSIS_FOCUS_GLOW_LAYER
+        : map.getLayer(debugHighlightLayerSpec(TRACE_DEBUG_SOURCE).id)
+          ? debugHighlightLayerSpec(TRACE_DEBUG_SOURCE).id
+          : undefined;
+      if (!map.getLayer(TRACE_ANALYSIS_MATCHES_GLOW_LAYER)) {
+        const layer = analysisMatchGlowLayerSpec(
+          TRACE_ANALYSIS_MATCHES_SOURCE,
+          TRACE_ANALYSIS_MATCHES_GLOW_LAYER,
+        ) as maplibregl.LayerSpecification;
+        if (beforeFocusOrDebug) map.addLayer(layer, beforeFocusOrDebug);
+        else map.addLayer(layer);
+      }
+      if (!map.getLayer(TRACE_ANALYSIS_MATCHES_LAYER)) {
+        const layer = analysisMatchLayerSpec(
+          TRACE_ANALYSIS_MATCHES_SOURCE,
+          TRACE_ANALYSIS_MATCHES_LAYER,
+        ) as maplibregl.LayerSpecification;
+        if (beforeFocusOrDebug) map.addLayer(layer, beforeFocusOrDebug);
+        else map.addLayer(layer);
+      }
+    };
+
+    map.on("style.load", apply);
+    if (
+      map.getSource(TRACE_ANALYSIS_MATCHES_SOURCE) ||
+      map.isStyleLoaded?.()
+    ) {
+      apply();
+    } else {
+      scheduleWhenStyleSettles();
+    }
+    return () => {
+      map.off("style.load", apply);
+      if (waitingForIdle) map.off("idle", handleIdle);
+    };
+  }, [
+    traceAnalysisExecutedSearch,
+    traceResultRevision,
+    traceRouteId,
+  ]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    let waitingForIdle = false;
+    const handleIdle = () => {
+      waitingForIdle = false;
+      apply();
+    };
+    const scheduleWhenStyleSettles = () => {
+      if (waitingForIdle || !map.once) return;
+      waitingForIdle = true;
+      map.once("idle", handleIdle);
+    };
+
+    const apply = () => {
+      const existing = map.getSource(TRACE_ANALYSIS_FOCUS_SOURCE) as
+        | maplibregl.GeoJSONSource
+        | undefined;
+      if (!traceAnalysisFocusedSegmentId && !existing) return;
+
+      const styleWasReady = Boolean(map.isStyleLoaded?.());
+      const data = buildAnalysisFocusFeatureCollection(
+        traceAnalysisFocusedSegmentId,
+        traceRouteId,
+        debugSegmentLookup,
+        true,
+      );
+      if (existing) {
+        existing.setData(data as unknown as GeoJSON.FeatureCollection);
+      } else {
+        if (!styleWasReady) {
+          scheduleWhenStyleSettles();
+          return;
+        }
+        map.addSource(TRACE_ANALYSIS_FOCUS_SOURCE, {
+          type: "geojson",
+          promoteId: "debugSegmentId",
+          data: data as unknown as GeoJSON.FeatureCollection,
+        });
+      }
+      if (!styleWasReady) {
+        scheduleWhenStyleSettles();
+        return;
+      }
+
+      const beforeDebug = map.getLayer(
+        debugHighlightLayerSpec(TRACE_DEBUG_SOURCE).id,
+      )
+        ? debugHighlightLayerSpec(TRACE_DEBUG_SOURCE).id
+        : undefined;
+      if (!map.getLayer(TRACE_ANALYSIS_FOCUS_GLOW_LAYER)) {
+        const layer = analysisFocusGlowLayerSpec(
+          TRACE_ANALYSIS_FOCUS_SOURCE,
+          TRACE_ANALYSIS_FOCUS_GLOW_LAYER,
+        ) as maplibregl.LayerSpecification;
+        if (beforeDebug) map.addLayer(layer, beforeDebug);
+        else map.addLayer(layer);
+      }
+      if (!map.getLayer(TRACE_ANALYSIS_FOCUS_LAYER)) {
+        const layer = analysisFocusLayerSpec(
+          TRACE_ANALYSIS_FOCUS_SOURCE,
+          TRACE_ANALYSIS_FOCUS_LAYER,
+        ) as maplibregl.LayerSpecification;
+        if (beforeDebug) map.addLayer(layer, beforeDebug);
+        else map.addLayer(layer);
+      }
+    };
+
+    map.on("style.load", apply);
+    if (
+      map.getSource(TRACE_ANALYSIS_FOCUS_SOURCE) ||
+      map.isStyleLoaded?.()
+    ) {
+      apply();
+    } else {
+      scheduleWhenStyleSettles();
+    }
+    return () => {
+      map.off("style.load", apply);
+      if (waitingForIdle) map.off("idle", handleIdle);
+    };
+  }, [
+    debugSegmentLookup,
+    traceAnalysisFocusedSegmentId,
+    traceRouteId,
+  ]);
 
   useEffect(() => {
     const map = mapRef.current;

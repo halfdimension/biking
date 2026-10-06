@@ -2,6 +2,16 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import TraceInspector from "./TraceInspector";
 import { useStore } from "../store";
+vi.mock("../api", () => ({
+  compare: vi.fn(),
+  osrmRaw: vi.fn(),
+  valhallaRaw: vi.fn(),
+  curlImport: vi.fn(),
+  health: vi.fn(),
+  valhallaTrace: vi.fn(),
+}));
+
+import * as api from "../api";
 import type {
   CompareResponse,
   NormalizedRoute,
@@ -171,6 +181,13 @@ function seedTraceDrawer(overrides: Record<string, unknown> = {}) {
     traceDetailsCollapsed: true,
     traceDetailsExpandedHeight: 180,
     traceFitRequestId: 0,
+    traceResultRevision: 1,
+    traceLowerTab: "edge-details",
+    traceEdgeDetailsOpenRequestId: 0,
+    traceAnalysisMetricId: "speed",
+    traceAnalysisQuery: { field: "speed", operator: "=", value: "" },
+    traceAnalysisExecutedSearch: null,
+    traceAnalysisFocusedSegmentId: null,
     ...overrides,
   });
 }
@@ -493,5 +510,82 @@ describe("Trace Inspector pinned-details drawer", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("Trace Inspector analysis workspace", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    seedTraceDrawer();
+  });
+
+  it("opens Route Analysis without a pin and expands from the compact strip", () => {
+    render(<TraceInspector />);
+    const workspace = document.querySelector(".trace-workspace");
+
+    expect(workspace).toHaveClass("trace-workspace--details-compact");
+    fireEvent.click(screen.getByRole("tab", { name: "Route Analysis" }));
+
+    expect(workspace).not.toHaveClass("trace-workspace--details-compact");
+    expect(screen.getByRole("region", {
+      name: "Trace Route Analysis",
+    })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", {
+      name: "Trace metric",
+    })).toBeInTheDocument();
+  });
+
+  it("graph click opens exact Edge Details and Route Analysis restores its search", () => {
+    render(<TraceInspector />);
+    fireEvent.click(screen.getByRole("tab", { name: "Route Analysis" }));
+
+    fireEvent.change(
+      screen.getByRole("combobox", { name: "Trace search field" }),
+      { target: { value: "density" } },
+    );
+    fireEvent.change(
+      screen.getByRole("spinbutton", { name: "Trace search value" }),
+      { target: { value: "10" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Highlight" }));
+    const search = useStore.getState().traceAnalysisExecutedSearch;
+    expect(search?.result.matchingSegmentCount).toBe(2);
+
+    fireEvent.click(screen.getByRole("img", {
+      name: /Valhalla Trace — OSRM Primary Speed step profile/,
+    }), { clientX: 80 });
+
+    expect(useStore.getState().tracePinnedSegmentIds).toEqual([first.id]);
+    expect(useStore.getState().tracePinnedPoint).toBeNull();
+    expect(screen.getByRole("tab", { name: "Edge Details" }))
+      .toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("trace-edge-details-body")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Route Analysis" }));
+    expect(useStore.getState().traceAnalysisExecutedSearch).toBe(search);
+    expect(screen.getByLabelText("Trace match statistics")).toHaveTextContent(
+      "2 matching segments",
+    );
+    expect(useStore.getState().tracePinnedSegmentIds).toEqual([first.id]);
+    expect(api.valhallaTrace).not.toHaveBeenCalled();
+    expect(api.compare).not.toHaveBeenCalled();
+  });
+
+  it("map pin switches from Route Analysis to expanded Edge Details", () => {
+    render(<TraceInspector />);
+    fireEvent.click(screen.getByRole("tab", { name: "Route Analysis" }));
+
+    act(() => {
+      useStore.getState().setTraceHoveredSegmentIds(
+        [second.id],
+        [77.02, 28.02],
+      );
+      useStore.getState().pinTraceHoveredSegments();
+    });
+
+    expect(useStore.getState().traceLowerTab).toBe("edge-details");
+    expect(useStore.getState().traceDetailsCollapsed).toBe(false);
+    expect(useStore.getState().tracePinnedSegmentIds).toEqual([second.id]);
+    expect(screen.getByTestId("trace-edge-details-body")).toBeVisible();
   });
 });

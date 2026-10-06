@@ -12,6 +12,7 @@ import { useStore } from "../store";
 import type { CompareDebug } from "../types";
 import EdgeDetailsPanel from "./EdgeDetailsPanel";
 import TraceMap from "./TraceMap";
+import TraceRouteAnalysis from "./TraceRouteAnalysis";
 
 export const TRACE_DETAILS_DEFAULT_HEIGHT = 180;
 export const TRACE_DETAILS_MIN_HEIGHT = 140;
@@ -80,7 +81,10 @@ export default function TraceInspector() {
     (state) => state.setTraceDetailsExpandedHeight,
   );
   const requestFit = useStore((state) => state.requestTraceFit);
-  const detailsCompact = !pinned || detailsCollapsed;
+  const lowerTab = useStore((state) => state.traceLowerTab);
+  const setLowerTab = useStore((state) => state.setTraceLowerTab);
+  const detailsCompact =
+    detailsCollapsed || (lowerTab === "edge-details" && !pinned);
 
   const osrmRoutes = results?.osrm.normalizedRoutes ?? [];
   const sourceRoute =
@@ -359,19 +363,76 @@ export default function TraceInspector() {
               <span />
             </div>
           ) : null}
-          <EdgeDetailsPanel
-            debug={debug}
-            routeLabels={routeLabels}
-            visibility={visibility}
-            pinnedIds={pinnedIds}
-            pinned={pinned}
-            point={pinnedPoint}
-            onClear={clearPin}
-            collapsible
-            collapsed={detailsCollapsed}
-            onToggleCollapsed={toggleDetails}
-            title="PINNED TRACE EDGE DETAILS"
-          />
+          <div
+            className="trace-details__tabs"
+            role="tablist"
+            aria-label="Trace analysis workspace"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={lowerTab === "edge-details"}
+              onClick={() => setLowerTab("edge-details")}
+            >
+              Edge Details
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={lowerTab === "route-analysis"}
+              onClick={() => setLowerTab("route-analysis")}
+            >
+              Route Analysis
+            </button>
+            {detailsCompact && lowerTab === "edge-details" && !pinned ? (
+              <span className="trace-details__compact-status">
+                No pinned edge
+              </span>
+            ) : null}
+            {lowerTab === "route-analysis" || (detailsCompact && !pinned) ? (
+              <button
+              type="button"
+              className="trace-details__collapse"
+              aria-expanded={!detailsCompact}
+              aria-label={
+                lowerTab === "edge-details"
+                  ? `${detailsCompact ? "Expand" : "Collapse"} pinned trace edge details`
+                  : `${detailsCompact ? "Expand" : "Collapse"} trace route analysis`
+              }
+              disabled={lowerTab === "edge-details" && !pinned}
+              onClick={toggleDetails}
+            >
+              {detailsCompact ? "Expand" : "Collapse"}
+              </button>
+            ) : null}
+          </div>
+          {!detailsCompact || (lowerTab === "edge-details" && pinned) ? (
+            <div
+              className="trace-details__body"
+              hidden={detailsCompact && !pinned}
+            >
+              {lowerTab === "edge-details" ? (
+                <EdgeDetailsPanel
+                  debug={debug}
+                  routeLabels={routeLabels}
+                  visibility={visibility}
+                  pinnedIds={pinnedIds}
+                  pinned={pinned}
+                  point={pinnedPoint}
+                  onClear={clearPin}
+                  collapsible
+                  collapsed={detailsCollapsed}
+                  onToggleCollapsed={toggleDetails}
+                  title="PINNED TRACE EDGE DETAILS"
+                />
+              ) : (
+                <TraceRouteAnalysis
+                  sourceRoute={sourceRoute}
+                  result={usableResult}
+                />
+              )}
+            </div>
+          ) : null}
         </section>
       </div>
     </main>

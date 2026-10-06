@@ -52,6 +52,16 @@ export interface ExecutedRouteAnalysisSearch {
   query: RouteAttributeQuery;
   result: RouteQueryResult;
 }
+
+export interface ExecutedTraceAnalysisSearch {
+  traceResultRevision: number;
+  routeId: string;
+  query: RouteAttributeQuery;
+  result: RouteQueryResult;
+}
+
+export type TraceLowerTab = "edge-details" | "route-analysis";
+
 /**
  * The lifecycle of a single Advanced/raw request send (Req 9.4–9.7). Kept in a
  * dedicated slice per engine so a raw-request failure never mislabels a
@@ -133,6 +143,12 @@ export interface AppState {
   traceDetailsCollapsed: boolean;
   traceDetailsExpandedHeight: number;
   traceFitRequestId: number;
+  traceLowerTab: TraceLowerTab;
+  traceEdgeDetailsOpenRequestId: number;
+  traceAnalysisMetricId: RouteMetricId;
+  traceAnalysisQuery: RouteAttributeQuery;
+  traceAnalysisExecutedSearch: ExecutedTraceAnalysisSearch | null;
+  traceAnalysisFocusedSegmentId: string | null;
 
   // Each screen owns a complete camera snapshot. The companion revision binds
   // it to the result that produced it, preventing an old viewport from being
@@ -265,9 +281,21 @@ export interface AppState {
     point?: [number, number] | null,
   ) => void;
   pinTraceHoveredSegments: () => void;
+  pinTraceSegments: (
+    ids: string[],
+    point?: [number, number] | null,
+  ) => void;
   clearTracePin: () => void;
   toggleTraceDetailsCollapsed: () => void;
   setTraceDetailsExpandedHeight: (height: number) => void;
+  setTraceLowerTab: (tab: TraceLowerTab) => void;
+  setTraceAnalysisMetricId: (metricId: RouteMetricId) => void;
+  setTraceAnalysisQuery: (query: RouteAttributeQuery) => void;
+  setTraceAnalysisExecutedSearch: (
+    search: ExecutedTraceAnalysisSearch | null,
+  ) => void;
+  clearTraceAnalysisSearch: () => void;
+  setTraceAnalysisFocusedSegmentId: (id: string | null) => void;
   requestTraceFit: () => void;
   setRouteComparisonCamera: (camera: MapCameraState) => void;
   clearRouteComparisonCamera: () => void;
@@ -609,6 +637,12 @@ export const useStore = create<AppState>((set, get) => ({
   traceDetailsCollapsed: false,
   traceDetailsExpandedHeight: 180,
   traceFitRequestId: 0,
+  traceLowerTab: "edge-details",
+  traceEdgeDetailsOpenRequestId: 0,
+  traceAnalysisMetricId: "speed",
+  traceAnalysisQuery: { field: "speed", operator: "=", value: "" },
+  traceAnalysisExecutedSearch: null,
+  traceAnalysisFocusedSegmentId: null,
   routeComparisonCamera: null,
   routeComparisonCameraResultRevision: null,
   comparisonResultRevision: 0,
@@ -719,6 +753,7 @@ export const useStore = create<AppState>((set, get) => ({
         selectedRouteId,
         debugResults: edgeDebugEnabled ? (results.debug ?? null) : null,
         routeAnalysisFocusedSegmentId: null,
+        traceAnalysisFocusedSegmentId: null,
         compareStatus: "done",
         comparisonResultRevision: previous.comparisonResultRevision + 1,
         lastError: null,
@@ -735,6 +770,8 @@ export const useStore = create<AppState>((set, get) => ({
               tracePinnedSegmentIds: [],
               tracePinnedPoint: null,
               traceInspectorPinned: false,
+              traceAnalysisExecutedSearch: null,
+              traceAnalysisFocusedSegmentId: null,
               traceResultRevision: previous.traceResultRevision + 1,
             }),
       });
@@ -822,6 +859,8 @@ export const useStore = create<AppState>((set, get) => ({
       tracePinnedSegmentIds: [],
       tracePinnedPoint: null,
       traceInspectorPinned: false,
+      traceAnalysisExecutedSearch: null,
+      traceAnalysisFocusedSegmentId: null,
       traceResultRevision: previous.traceResultRevision + 1,
     });
   },
@@ -852,6 +891,8 @@ export const useStore = create<AppState>((set, get) => ({
       tracePinnedSegmentIds: [],
       tracePinnedPoint: null,
       traceInspectorPinned: false,
+      traceAnalysisExecutedSearch: null,
+      traceAnalysisFocusedSegmentId: null,
     });
     try {
       const result = await api.valhallaTrace(route.id, encodedPolyline);
@@ -898,15 +939,24 @@ export const useStore = create<AppState>((set, get) => ({
     });
   },
 
-  pinTraceHoveredSegments: () => {
-    const state = get();
-    if (state.traceHoveredSegmentIds.length === 0) return;
-    set({
-      tracePinnedSegmentIds: [...state.traceHoveredSegmentIds],
-      tracePinnedPoint: state.traceHoveredPoint,
+  pinTraceSegments: (ids, point = null) => {
+    if (ids.length === 0) return;
+    set((state) => ({
+      tracePinnedSegmentIds: [...ids],
+      tracePinnedPoint: point,
       traceInspectorPinned: true,
       traceDetailsCollapsed: false,
-    });
+      traceLowerTab: "edge-details",
+      traceEdgeDetailsOpenRequestId: state.traceEdgeDetailsOpenRequestId + 1,
+    }));
+  },
+
+  pinTraceHoveredSegments: () => {
+    const state = get();
+    state.pinTraceSegments(
+      state.traceHoveredSegmentIds,
+      state.traceHoveredPoint,
+    );
   },
 
   clearTracePin: () =>
@@ -923,6 +973,38 @@ export const useStore = create<AppState>((set, get) => ({
 
   setTraceDetailsExpandedHeight: (height) =>
     set({ traceDetailsExpandedHeight: height }),
+
+  setTraceLowerTab: (tab) =>
+    set({ traceLowerTab: tab, traceDetailsCollapsed: false }),
+
+  setTraceAnalysisMetricId: (metricId) =>
+    set({ traceAnalysisMetricId: metricId }),
+
+  setTraceAnalysisQuery: (query) =>
+    set((state) => {
+      const current = state.traceAnalysisQuery;
+      const changed =
+        current.field !== query.field ||
+        current.operator !== query.operator ||
+        current.value !== query.value;
+      return {
+        traceAnalysisQuery: query,
+        traceAnalysisExecutedSearch: changed
+          ? null
+          : state.traceAnalysisExecutedSearch,
+      };
+    }),
+
+  setTraceAnalysisExecutedSearch: (search) =>
+    set({ traceAnalysisExecutedSearch: search }),
+
+  clearTraceAnalysisSearch: () =>
+    set({ traceAnalysisExecutedSearch: null }),
+
+  setTraceAnalysisFocusedSegmentId: (id) => {
+    if (get().traceAnalysisFocusedSegmentId === id) return;
+    set({ traceAnalysisFocusedSegmentId: id });
+  },
 
   requestTraceFit: () =>
     set((state) => ({ traceFitRequestId: state.traceFitRequestId + 1 })),

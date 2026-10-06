@@ -6,7 +6,13 @@ import TraceMap, {
 } from "./TraceMap";
 import { useStore } from "../store";
 import { resolveMapStyle } from "../map/style";
-import type { NormalizedRoute, ValhallaTraceResult } from "../types";
+import type {
+  NormalizedRoute,
+  ValhallaDebugSegment,
+  ValhallaTraceResult,
+} from "../types";
+import { deriveRouteProfile } from "../analysis/routeProfile";
+import { evaluateRouteQuery } from "../analysis/routeQuery";
 
 let styleLoaded = true;
 let unsetStyleAfterSourceAdd = false;
@@ -141,7 +147,41 @@ function sourceRoute(coordinates: [number, number][] = [[77, 28], [77.1, 28.1]])
   };
 }
 
-function traceResult(traceGeometry: [number, number][]): ValhallaTraceResult {
+function analysisSegment(): ValhallaDebugSegment {
+  return {
+    id: "trace:osrm:0:0",
+    engine: "valhalla",
+    routeId: "trace:osrm:0",
+    routeIndex: 0,
+    legIndex: 0,
+    segmentIndex: 0,
+    coordinates: [[77.015, 28.015], [77.075, 28.075]],
+    properties: {
+      id: "trace-edge",
+      wayId: "trace-way",
+      name: ["Trace edge"],
+      lengthKm: 0.12,
+      speed: 35,
+      density: 15,
+      roadClass: "kTrunk",
+      surface: "kPavedSmooth",
+      use: "kRoad",
+      toll: false,
+      unpaved: false,
+      tunnel: false,
+      bridge: false,
+      roundabout: false,
+      beginShapeIndex: 0,
+      endShapeIndex: 1,
+      traversability: "kBoth",
+    },
+  } as unknown as ValhallaDebugSegment;
+}
+
+function traceResult(
+  traceGeometry: [number, number][],
+  segments: ValhallaDebugSegment[] = [],
+): ValhallaTraceResult {
   return {
     status: "ok",
     sourceRouteId: "osrm:0",
@@ -151,7 +191,7 @@ function traceResult(traceGeometry: [number, number][]): ValhallaTraceResult {
     originalPointCount: 2,
     tracePointCount: traceGeometry.length,
     geometryDeviation: null,
-    segments: [],
+    segments,
     warnings: [],
     errors: [],
     httpStatus: 200,
@@ -171,6 +211,8 @@ function resetStore(result: ValhallaTraceResult | null = null) {
     routeComparisonCamera: null,
     routeComparisonCameraResultRevision: null,
     comparisonResultRevision: 0,
+    traceAnalysisExecutedSearch: null,
+    traceAnalysisFocusedSegmentId: null,
   });
 }
 
@@ -424,5 +466,137 @@ describe("TraceMap camera persistence", () => {
     expect(useStore.getState().traceInspectorCamera).toEqual(
       expect.objectContaining({ pitch: 0, bearing: 0 }),
     );
+  });
+});
+
+describe("TraceMap analysis overlays", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    instances.length = 0;
+    styleLoaded = true;
+    unsetStyleAfterSourceAdd = false;
+    resetStore();
+  });
+
+  it("renders exact search/focus geometry below debug layers and restores it after style.load", () => {
+    const segment = analysisSegment();
+    const trace = traceResult(
+      [[77, 28], [77.05, 28.05], [77.1, 28.1]],
+      [segment],
+    );
+    const profile = deriveRouteProfile(trace.segments, "trace:osrm:0");
+    const searchResult = evaluateRouteQuery(profile, {
+      field: "density",
+      operator: "=",
+      value: "15",
+    });
+    useStore.setState({
+      traceResult: trace,
+      traceResultRevision: 9,
+      traceAnalysisExecutedSearch: {
+        traceResultRevision: 9,
+        routeId: "trace:osrm:0",
+        query: { field: "density", operator: "=", value: "15" },
+        result: searchResult,
+      },
+      traceAnalysisFocusedSegmentId: segment.id,
+    });
+
+    render(<TraceMap sourceRoute={sourceRoute()} />);
+    const map = instances[0];
+    const matches = map.sources.get("trace-analysis-matches")!;
+    const focus = map.sources.get("trace-analysis-focus")!;
+    const matchData = matches.data as {
+      features: Array<{ geometry: { coordinates: [number, number][] } }>;
+    };
+    const focusData = focus.data as {
+      features: Array<{ geometry: { coordinates: [number, number][] } }>;
+    };
+
+    expect(matchData.features).toHaveLength(1);
+    expect(matchData.features[0].geometry.coordinates).toEqual(
+      segment.coordinates,
+    );
+    expect(focusData.features).toHaveLength(1);
+    expect(focusData.features[0].geometry.coordinates).toEqual(
+      segment.coordinates,
+    );
+
+    const order = Array.from(map.layers.keys());
+    expect(order.indexOf("trace-original-route")).toBeLessThan(
+      order.indexOf("trace-snapped-route"),
+    );
+    expect(order.indexOf("trace-snapped-route")).toBeLessThan(
+      order.indexOf("trace-analysis-matches-glow"),
+    );
+    expect(order.indexOf("trace-analysis-matches-line")).toBeLessThan(
+      order.indexOf("trace-analysis-focus-glow"),
+    );
+    expect(order.indexOf("trace-analysis-focus-line")).toBeLessThan(
+      order.indexOf("route-debug-highlight"),
+    );
+    expect(order.indexOf("route-debug-highlight")).toBeLessThan(
+      order.indexOf("route-debug-hit"),
+    );
+
+    map.sources.clear();
+    map.layers.clear();
+    act(() => map.emit("style.load"));
+    expect(map.sources.has("trace-analysis-matches")).toBe(true);
+    expect(map.sources.has("trace-analysis-focus")).toBe(true);
+    expect(map.layers.has("trace-analysis-matches-line")).toBe(true);
+    expect(map.layers.has("trace-analysis-focus-line")).toBe(true);
+    expect(map.layers.has("route-debug-highlight")).toBe(true);
+    expect(map.layers.has("route-debug-hit")).toBe(true);
+
+    const sourceCount = map.sources.size;
+    const layerCount = map.layers.size;
+    act(() => map.emit("style.load"));
+    expect(map.sources.size).toBe(sourceCount);
+    expect(map.layers.size).toBe(layerCount);
+  });
+
+  it("clears search and focus independently without changing trace route/debug sources", () => {
+    const segment = analysisSegment();
+    const trace = traceResult([[77, 28], [77.1, 28.1]], [segment]);
+    const profile = deriveRouteProfile(trace.segments, "trace:osrm:0");
+    useStore.setState({
+      traceResult: trace,
+      traceResultRevision: 3,
+      traceAnalysisExecutedSearch: {
+        traceResultRevision: 3,
+        routeId: "trace:osrm:0",
+        query: { field: "speed", operator: "=", value: "35" },
+        result: evaluateRouteQuery(profile, {
+          field: "speed",
+          operator: "=",
+          value: "35",
+        }),
+      },
+      traceAnalysisFocusedSegmentId: segment.id,
+    });
+
+    render(<TraceMap sourceRoute={sourceRoute()} />);
+    const map = instances[0];
+    const routeSource = map.sources.get("trace-inspector-routes");
+    const debugSource = map.sources.get("trace-inspector-debug");
+
+    act(() => useStore.getState().setTraceAnalysisFocusedSegmentId(null));
+    expect(
+      (map.sources.get("trace-analysis-focus")!.data as { features: unknown[] })
+        .features,
+    ).toEqual([]);
+    expect(
+      (map.sources.get("trace-analysis-matches")!.data as { features: unknown[] })
+        .features,
+    ).toHaveLength(1);
+
+    act(() => useStore.getState().clearTraceAnalysisSearch());
+    expect(
+      (map.sources.get("trace-analysis-matches")!.data as { features: unknown[] })
+        .features,
+    ).toEqual([]);
+    expect(map.sources.get("trace-inspector-routes")).toBe(routeSource);
+    expect(map.sources.get("trace-inspector-debug")).toBe(debugSource);
   });
 });

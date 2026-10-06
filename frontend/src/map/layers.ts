@@ -177,9 +177,12 @@ export const ANALYSIS_FOCUS_LAYER_ID = "route-analysis-focus-line";
  * Additive Route Analysis overlay. The dark outline separates the cyan match
  * line from both route color families; debug hover/pin layers are added above.
  */
-export function analysisMatchGlowLayerSpec(sourceId: string) {
+export function analysisMatchGlowLayerSpec(
+  sourceId: string,
+  layerId = ANALYSIS_MATCH_GLOW_LAYER_ID,
+) {
   return {
-    id: ANALYSIS_MATCH_GLOW_LAYER_ID,
+    id: layerId,
     type: "line" as const,
     source: sourceId,
     layout: { "line-cap": "round" as const, "line-join": "round" as const },
@@ -192,9 +195,12 @@ export function analysisMatchGlowLayerSpec(sourceId: string) {
   };
 }
 
-export function analysisMatchLayerSpec(sourceId: string) {
+export function analysisMatchLayerSpec(
+  sourceId: string,
+  layerId = ANALYSIS_MATCH_LAYER_ID,
+) {
   return {
-    id: ANALYSIS_MATCH_LAYER_ID,
+    id: layerId,
     type: "line" as const,
     source: sourceId,
     layout: { "line-cap": "round" as const, "line-join": "round" as const },
@@ -207,9 +213,12 @@ export function analysisMatchLayerSpec(sourceId: string) {
 }
 
 /** One-edge chart focus, deliberately stronger and distinct from cyan search. */
-export function analysisFocusGlowLayerSpec(sourceId: string) {
+export function analysisFocusGlowLayerSpec(
+  sourceId: string,
+  layerId = ANALYSIS_FOCUS_GLOW_LAYER_ID,
+) {
   return {
-    id: ANALYSIS_FOCUS_GLOW_LAYER_ID,
+    id: layerId,
     type: "line" as const,
     source: sourceId,
     layout: { "line-cap": "round" as const, "line-join": "round" as const },
@@ -222,9 +231,12 @@ export function analysisFocusGlowLayerSpec(sourceId: string) {
   };
 }
 
-export function analysisFocusLayerSpec(sourceId: string) {
+export function analysisFocusLayerSpec(
+  sourceId: string,
+  layerId = ANALYSIS_FOCUS_LAYER_ID,
+) {
   return {
-    id: ANALYSIS_FOCUS_LAYER_ID,
+    id: layerId,
     type: "line" as const,
     source: sourceId,
     layout: { "line-cap": "round" as const, "line-join": "round" as const },

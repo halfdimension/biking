@@ -86,6 +86,23 @@ describe("Trace Inspector store isolation", () => {
       traceResultRevision: 0,
       traceInspectorCamera: null,
       traceInspectorCameraResultRevision: null,
+      traceAnalysisQuery: { field: "speed", operator: "=", value: "35" },
+      traceAnalysisExecutedSearch: {
+        traceResultRevision: 0,
+        routeId: "trace:osrm:0",
+        query: { field: "speed", operator: "=", value: "35" },
+        result: {
+          matchingSegmentIds: [],
+          matchingSegments: [],
+          matchedDistanceMeters: 0,
+          matchedPercentage: 0,
+          totalSegmentCount: 0,
+          matchingSegmentCount: 0,
+          missingLengthSegmentCount: 0,
+          hasIncompleteDistanceCoverage: false,
+        },
+      },
+      traceAnalysisFocusedSegmentId: "trace:osrm:0:0",
     });
   });
 
@@ -99,6 +116,8 @@ describe("Trace Inspector store isolation", () => {
     expect(useStore.getState().traceStatus).toBe("idle");
     expect(useStore.getState().tracePinnedSegmentIds).toEqual([]);
     expect(useStore.getState().selectedRouteId).toBe("osrm:0");
+    expect(useStore.getState().traceAnalysisExecutedSearch).toBeNull();
+    expect(useStore.getState().traceAnalysisFocusedSegmentId).toBeNull();
   });
 
   it("preserves a compatible trace across navigation-independent comparison state", async () => {
@@ -108,6 +127,8 @@ describe("Trace Inspector store isolation", () => {
 
     expect(useStore.getState().traceResult).toBe(oldTrace);
     expect(useStore.getState().traceStatus).toBe("done");
+    expect(useStore.getState().traceAnalysisExecutedSearch).not.toBeNull();
+    expect(useStore.getState().traceAnalysisFocusedSegmentId).toBeNull();
   });
 
   it("advances trace identity only when an explicit trace returns", async () => {
@@ -121,5 +142,55 @@ describe("Trace Inspector store isolation", () => {
     expect(api.valhallaTrace).toHaveBeenCalledOnce();
     expect(useStore.getState().traceResultRevision).toBe(1);
     expect(useStore.getState().traceResult).toBe(oldTrace);
+  });
+});
+
+describe("Trace analysis result lifecycle", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useStore.setState({
+      results: response("old-geometry"),
+      traceSourceRouteId: "osrm:0",
+      traceSourceEncodedPolyline: "old-geometry",
+      traceStatus: "done",
+      traceResult: oldTrace,
+      traceResultRevision: 4,
+      traceAnalysisExecutedSearch: {
+        traceResultRevision: 4,
+        routeId: "trace:osrm:0",
+        query: { field: "speed", operator: "=", value: "35" },
+        result: {
+          matchingSegmentIds: [],
+          matchingSegments: [],
+          matchedDistanceMeters: 0,
+          matchedPercentage: 0,
+          totalSegmentCount: 0,
+          matchingSegmentCount: 0,
+          missingLengthSegmentCount: 0,
+          hasIncompleteDistanceCoverage: false,
+        },
+      },
+      traceAnalysisFocusedSegmentId: "trace:osrm:0:0",
+    });
+  });
+
+  it("clears stale search geometry and transient focus as soon as a new trace starts", async () => {
+    let resolveTrace!: (value: ValhallaTraceResult) => void;
+    vi.mocked(api.valhallaTrace).mockImplementation(
+      () => new Promise((resolve) => {
+        resolveTrace = resolve;
+      }),
+    );
+
+    const pending = useStore.getState().runValhallaTrace();
+
+    expect(useStore.getState().traceStatus).toBe("loading");
+    expect(useStore.getState().traceResult).toBeNull();
+    expect(useStore.getState().traceAnalysisExecutedSearch).toBeNull();
+    expect(useStore.getState().traceAnalysisFocusedSegmentId).toBeNull();
+
+    resolveTrace(oldTrace);
+    await pending;
+    expect(useStore.getState().traceResultRevision).toBe(5);
   });
 });

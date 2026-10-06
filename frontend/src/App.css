@@ -2346,3 +2346,104 @@ body,
     flex-wrap: wrap;
   }
 }
+
+.trace-details__tabs {
+  display: flex;
+  min-height: 34px;
+  flex: 0 0 34px;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--border-color);
+  background: #f8fafc;
+}
+
+.trace-details__tabs > button {
+  min-height: 27px;
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.trace-details__tabs > button[role="tab"][aria-selected="true"] {
+  border-color: #cbd5e1;
+  background: #fff;
+  color: #0f172a;
+}
+
+.trace-details__tabs > button:disabled {
+  cursor: default;
+  opacity: 0.48;
+}
+
+.trace-details__tabs .trace-details__collapse,
+.trace-details__tabs .trace-details__clear {
+  margin-left: auto;
+}
+
+.trace-details__tabs .trace-details__clear + .trace-details__collapse {
+  margin-left: 0;
+}
+
+.trace-details__compact-status {
+  min-width: 0;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trace-details__body {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: auto;
+}
+
+.trace-details__body > .edge-details,
+.trace-details__body > .route-analysis {
+  min-height: 100%;
+}
+
+.trace-details--compact .trace-details__tabs {
+  min-height: 43px;
+  flex-basis: 43px;
+  border-bottom: 0;
+}
+
+.trace-route-analysis {
+  padding: 8px 10px 10px;
+  box-sizing: border-box;
+}
+
+.trace-details {
+  position: relative;
+}
+
+.trace-details--compact .trace-details__body:not([hidden]) {
+  position: absolute;
+  z-index: 3;
+  inset: 0 0 0 225px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.trace-details--compact .edge-details--drawer .edge-details__toolbar {
+  border-bottom: 0;
+  background: transparent;
+  pointer-events: none;
+}
+
+.trace-details--compact .edge-details__toolbar strong {
+  display: none;
+}
+
+.trace-details--compact .edge-details__count,
+.trace-details--compact .edge-details__toolbar button {
+  pointer-events: auto;
+}
