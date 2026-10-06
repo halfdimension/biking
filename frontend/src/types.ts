@@ -9,6 +9,7 @@
 
 /** The two routing engines under comparison. */
 export type Engine = "osrm" | "valhalla";
+export type RoutingTarget = "local" | "prod";
 
 /**
  * A simple lat/lon coordinate as used for start/dest inputs.
@@ -199,6 +200,8 @@ export interface CompareDebug {
 export interface CompareResponse {
   osrm: EngineResult;
   valhalla: EngineResult;
+  /** Target that produced these results; optional for legacy cached fixtures. */
+  routingTarget?: RoutingTarget;
   /** Present only when the request opted into edge-debug extraction. */
   debug?: CompareDebug | null;
 }

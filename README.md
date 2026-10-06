@@ -12,15 +12,17 @@ Data flow:
 Browser
   → React + Vite + MapLibre GL JS frontend
     → FastAPI backend proxy
-      → OSRM     (http://localhost:5000)
-      → Valhalla (http://localhost:8002)
+      → Local OSRM / Valhalla (localhost)
+      → Prod Mappls routing APIs (canonical Compare only)
 ```
 
 The frontend never calls the routing engines directly. All engine traffic goes
 through the backend proxy, which:
 
-- enforces a host allowlist (`localhost:5000`, `localhost:8002`),
-- forwards the request to the target engine,
+- keeps Advanced raw/curl forwarding restricted to `localhost:5000` and
+  `localhost:8002`,
+- permits canonical Prod Compare calls only to the fixed Mappls production host,
+- forwards the request to the selected routing target,
 - times the round trip,
 - normalizes each engine's response into a uniform per-engine envelope
   (`EngineResult` / `EngineError`), and
@@ -80,6 +82,20 @@ npm run dev
 - Backend API base URL: **http://localhost:8000** (frontend default). Override
   with the `VITE_API_BASE_URL` environment variable if the backend runs on a
   different host/port.
+
+### Optional production routing target
+
+Local is the default and requires no additional configuration. To enable the
+**Prod** Compare target, set the backend environment variable named
+`MAPPLS_PROD_ACCESS_TOKEN` before starting uvicorn.
+
+The environment variable takes precedence. As a local-only fallback, copy
+`backend/app/local_secrets.example.py` to `backend/app/local_secrets.py` and
+replace its placeholder. The fallback file is gitignored. The token is read
+only by the backend: it is never sent to the browser, stored in frontend state,
+or shown in request previews. If neither source supplies a non-empty token,
+Prod Compare returns an actionable per-engine configuration error and does not
+fall back to Local. Advanced raw/curl forwarding remains localhost-only.
 
 Production build (optional preview of the built bundle):
 
@@ -166,8 +182,12 @@ menu with **Set as Start** / **Set as Destination**.
 
 ### Compare Routes
 
-The **Compare Routes** button runs both engines concurrently through the
-backend and renders all returned routes.
+Choose **Routing: Local** or **Routing: Prod**, then press **Compare Routes**.
+Changing the target does not send a request or erase existing results; result
+provenance continues to show which target produced the displayed response.
+Local preserves the localhost OSRM/Valhalla requests. Prod uses backend-managed
+Mappls GET requests with redacted browser previews. Edge Debug and Trace
+Inspector remain Local-only.
 
 ### Route colors
 

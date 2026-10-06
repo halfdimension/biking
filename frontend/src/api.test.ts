@@ -46,7 +46,7 @@ describe("api client", () => {
     expect(url).toBe(`${API_BASE_URL}/api/compare`);
     expect(init.method).toBe("POST");
     expect(init.headers).toMatchObject({ "Content-Type": "application/json" });
-    expect(JSON.parse(init.body)).toEqual({ start, dest });
+    expect(JSON.parse(init.body)).toEqual({ start, dest, target: "local" });
     expect(result).toEqual(responseBody);
   });
 
@@ -63,7 +63,12 @@ describe("api client", () => {
     await compare(start, dest, true);
 
     const [, init] = fetchMock.mock.calls[0];
-    expect(JSON.parse(init.body)).toEqual({ start, dest, includeDebug: true });
+    expect(JSON.parse(init.body)).toEqual({
+      start,
+      dest,
+      target: "local",
+      includeDebug: true,
+    });
   });
 
   it("compare throws with the response detail on non-2xx", async () => {

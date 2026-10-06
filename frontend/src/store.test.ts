@@ -93,6 +93,7 @@ function resetStore() {
     dest: null,
     mapClickTarget: null,
     mode: "normal",
+    routingTarget: "local",
     osrmUrlDraft: "",
     valhallaUrlDraft: "",
     valhallaBodyDraft: "",
@@ -152,6 +153,8 @@ describe("store", () => {
       expect(api.compare).toHaveBeenCalledWith(
         { lat: 12.9, lon: 77.6 },
         { lat: 12.95, lon: 77.65 },
+        false,
+        "local",
       );
       expect(state.routes.map((r) => r.id)).toEqual(ALL_IDS);
       expect(state.compareStatus).toBe("done");

@@ -31,6 +31,7 @@ import type {
   RouteQuality,
   TestCase,
   ValhallaTraceResult,
+  RoutingTarget,
 } from "./types";
 import type { MapCameraState } from "./map/camera";
 import type { RouteMetricId } from "./analysis/routeProfile";
@@ -106,6 +107,7 @@ export interface AppState {
 
   // Request construction (Req 9)
   mode: AppMode;
+  routingTarget: RoutingTarget;
   osrmUrlDraft: string;
   valhallaUrlDraft: string;
   valhallaBodyDraft: string;
@@ -260,6 +262,7 @@ export interface AppState {
   setDest: (c: Coordinate | null) => void;
   setMapClickTarget: (t: MapClickTarget) => void;
   setMode: (m: AppMode) => void;
+  setRoutingTarget: (target: RoutingTarget) => void;
   setOsrmUrlDraft: (url: string) => void;
   setValhallaUrlDraft: (url: string) => void;
   setValhallaBodyDraft: (body: string) => void;
@@ -615,6 +618,7 @@ export const useStore = create<AppState>((set, get) => ({
   mapClickTarget: null,
 
   mode: "normal",
+  routingTarget: "local",
   osrmUrlDraft: "",
   valhallaUrlDraft: "",
   valhallaBodyDraft: "",
@@ -705,12 +709,23 @@ export const useStore = create<AppState>((set, get) => ({
   setDest: (c) => set({ dest: c }),
   setMapClickTarget: (t) => set({ mapClickTarget: t }),
   setMode: (m) => set({ mode: m }),
+  setRoutingTarget: (target) =>
+    set((state) => ({
+      routingTarget: target,
+      edgeDebugEnabled: target === "prod" ? false : state.edgeDebugEnabled,
+      hoveredDebugSegmentIds: target === "prod" ? [] : state.hoveredDebugSegmentIds,
+      hoveredDebugPoint: target === "prod" ? null : state.hoveredDebugPoint,
+      pinnedDebugSegmentIds: target === "prod" ? [] : state.pinnedDebugSegmentIds,
+      pinnedDebugPoint: target === "prod" ? null : state.pinnedDebugPoint,
+      debugInspectorPinned: target === "prod" ? false : state.debugInspectorPinned,
+    })),
   setOsrmUrlDraft: (url) => set({ osrmUrlDraft: url }),
   setValhallaUrlDraft: (url) => set({ valhallaUrlDraft: url }),
   setValhallaBodyDraft: (body) => set({ valhallaBodyDraft: body }),
 
   runCompare: async () => {
-    const { start, dest, edgeDebugEnabled } = get();
+    const { start, dest, edgeDebugEnabled, routingTarget } = get();
+    const includeDebug = edgeDebugEnabled && routingTarget === "local";
     // A result-bound segment id must never survive into a new comparison.
     set({
       debugResults: null,
@@ -735,9 +750,12 @@ export const useStore = create<AppState>((set, get) => ({
       latestResponseSource: { osrm: "compare", valhalla: "compare" },
     });
     try {
-      const results = edgeDebugEnabled
-        ? await api.compare(start, dest, true)
-        : await api.compare(start, dest);
+      const results = await api.compare(
+        start,
+        dest,
+        includeDebug,
+        routingTarget,
+      );
       const routes = flattenRoutes(results);
       // Initialize visibility to all-visible for the returned routes only.
       const visibility = buildVisibility(routes, () => true);
@@ -763,7 +781,7 @@ export const useStore = create<AppState>((set, get) => ({
         routes,
         visibility,
         selectedRouteId,
-        debugResults: edgeDebugEnabled ? (results.debug ?? null) : null,
+        debugResults: includeDebug ? (results.debug ?? null) : null,
         routeAnalysisFocusedSegmentId: null,
         traceAnalysisFocusedSegmentId: null,
         compareStatus: "done",
@@ -796,6 +814,7 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   setEdgeDebugEnabled: (enabled) => {
+    if (enabled && get().routingTarget === "prod") return;
     set({
       edgeDebugEnabled: enabled,
       hoveredDebugSegmentIds: [],

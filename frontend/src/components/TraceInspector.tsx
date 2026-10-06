@@ -61,7 +61,10 @@ export default function TraceInspector() {
     bodyClassName: "is-resizing-trace-details",
   });
 
-  const osrmRoutes = results?.osrm.normalizedRoutes ?? [];
+  const comparisonIsLocal = (results?.routingTarget ?? "local") === "local";
+  const osrmRoutes = comparisonIsLocal
+    ? (results?.osrm.normalizedRoutes ?? [])
+    : [];
   const sourceRoute =
     osrmRoutes.find((route) => route.id === sourceRouteId) ?? osrmRoutes[0];
   const usableResult =
@@ -110,8 +113,8 @@ export default function TraceInspector() {
       <header className="trace-toolbar">
         <div>
           <p className="trace-toolbar__eyebrow">MAP-MATCH DEBUGGING</p>
-          <h1>Trace Inspector</h1>
-          <p>Inspect Valhalla’s map-snapped interpretation of a preserved OSRM route.</p>
+          <h1>Trace Inspector — Local Valhalla</h1>
+          <p>Inspect Local Valhalla’s map-snapped interpretation of a preserved OSRM route.</p>
         </div>
         <button type="button" className="toolbar__fit-btn" onClick={requestFit}>
           Fit Routes
@@ -155,7 +158,11 @@ export default function TraceInspector() {
       </section>
 
       {osrmRoutes.length === 0 ? (
-        <div className="trace-empty" role="status">Run a route comparison first.</div>
+        <div className="trace-empty" role="status">
+          {comparisonIsLocal
+            ? "Run a route comparison first."
+            : "Trace Inspector is Local-only. Run a Local comparison first."}
+        </div>
       ) : null}
 
       {error ? <div className="trace-error" role="alert">{error}</div> : null}

@@ -32,6 +32,7 @@ describe("Edge Debug store", () => {
     vi.clearAllMocks();
     useStore.setState({
       start: { lat: 28.6, lon: 77.2 },
+      routingTarget: "local",
       dest: { lat: 28.5, lon: 77.3 },
       edgeDebugEnabled: false,
       debugResults: null,
@@ -53,6 +54,8 @@ describe("Edge Debug store", () => {
     expect(api.compare).toHaveBeenLastCalledWith(
       { lat: 28.6, lon: 77.2 },
       { lat: 28.5, lon: 77.3 },
+      false,
+      "local",
     );
     expect(useStore.getState().debugResults).toBeNull();
 
@@ -62,6 +65,7 @@ describe("Edge Debug store", () => {
       { lat: 28.6, lon: 77.2 },
       { lat: 28.5, lon: 77.3 },
       true,
+      "local",
     );
     expect(useStore.getState().debugResults).toEqual(response.debug);
   });

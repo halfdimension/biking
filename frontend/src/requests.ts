@@ -50,6 +50,36 @@ export function buildOsrmPreviewUrl(
   return `${baseUrl}/route/v1/biking/${coords}?${DEFAULT_OSRM_QUERY}`;
 }
 
+export const PROD_OSRM_QUERY =
+  "steps=false" +
+  "&geometries=polyline6" +
+  "&overview=full" +
+  "&alternatives=true" +
+  "&annotations=nodes,distance,duration,weight,speed,datasources";
+
+export function buildProdOsrmPreviewUrl(
+  start: Coordinate,
+  dest: Coordinate,
+): string {
+  const coords = `${start.lon},${start.lat};${dest.lon},${dest.lat}`;
+  return `https://apis.mapmyindia.com/advancedmaps/v1/<TOKEN>/route_adv/biking/${coords}?${PROD_OSRM_QUERY}`;
+}
+
+export function buildProdValhallaPreviewUrl(
+  start: Coordinate,
+  dest: Coordinate,
+): string {
+  const locations = `${start.lon},${start.lat};${dest.lon},${dest.lat}`;
+  const params = new URLSearchParams([
+    ["profile", "biking"],
+    ["access_token", "<TOKEN>"],
+    ["locations", locations],
+    ["date_time", '0,""'],
+    ["speedTypes", "traffic"],
+  ]);
+  return `https://apis.mapmyindia.com/advancedmaps/v2/route?${params.toString().replace("%3CTOKEN%3E", "<TOKEN>")}`;
+}
+
 /**
  * Build the canonical Valhalla POST body for display (Req 2.2, 7.3).
  *

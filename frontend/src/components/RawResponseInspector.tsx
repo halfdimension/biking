@@ -36,12 +36,14 @@ const ENGINE_NAME: Record<Engine, string> = {
 function sourceLabel(
   source: ResponseSource,
   rawSource: "engine-json" | "protobuf-derived" | undefined,
+  routingTarget: "local" | "prod",
 ): string | null {
   if (source === "raw") return "Advanced raw";
   if (source === "compare") {
+    const target = routingTarget === "prod" ? "Prod" : "Local";
     return rawSource === "protobuf-derived"
-      ? "Compare · Protobuf-derived"
-      : "Compare";
+      ? `Compare · ${target} · Protobuf-derived`
+      : `Compare · ${target}`;
   }
   return null;
 }
@@ -52,6 +54,7 @@ export default function RawResponseInspector({ engine }: { engine: Engine }) {
   const valhallaRawState = useStore((s) => s.valhallaRawState);
   const compareStatus = useStore((s) => s.compareStatus);
   const latestResponseSource = useStore((s) => s.latestResponseSource);
+  const resultTarget = results?.routingTarget ?? "local";
 
   const resp = selectEngineResponse(
     {
@@ -113,7 +116,7 @@ export default function RawResponseInspector({ engine }: { engine: Engine }) {
     );
   }
 
-  const src = sourceLabel(resp.source, resp.result?.rawSource);
+  const src = sourceLabel(resp.source, resp.result?.rawSource, resultTarget);
   const isError = resp.status === "error";
 
   return (

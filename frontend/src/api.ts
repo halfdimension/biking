@@ -16,6 +16,7 @@ import type {
   EngineHealth,
   EngineResult,
   ValhallaTraceResult,
+  RoutingTarget,
 } from "./types";
 
 const DEFAULT_BASE_URL = "http://localhost:8000";
@@ -97,10 +98,13 @@ export function compare(
   start: Coordinate,
   dest: Coordinate,
   includeDebug = false,
+  target: RoutingTarget = "local",
 ): Promise<CompareResponse> {
   return postJson<CompareResponse>(
     "/api/compare",
-    includeDebug ? { start, dest, includeDebug: true } : { start, dest },
+    includeDebug
+      ? { start, dest, target, includeDebug: true }
+      : { start, dest, target },
   );
 }
 

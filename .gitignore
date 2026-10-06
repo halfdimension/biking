@@ -23,3 +23,6 @@ frontend/.vite/
 # OS/editor
 .DS_Store
 Thumbs.db
+
+# Local backend secrets - never commit
+backend/app/local_secrets.py

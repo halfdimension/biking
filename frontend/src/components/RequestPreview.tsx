@@ -12,7 +12,14 @@
  * start/dest, so these previews never drive an actual request.
  */
 import { useStore } from "../store";
-import { isValidLat, isValidLon, buildOsrmPreviewUrl, buildValhallaPreviewJson } from "../requests";
+import {
+  isValidLat,
+  isValidLon,
+  buildOsrmPreviewUrl,
+  buildValhallaPreviewJson,
+  buildProdOsrmPreviewUrl,
+  buildProdValhallaPreviewUrl,
+} from "../requests";
 import type { Coordinate } from "../types";
 
 function isValidCoord(c: Coordinate | null): c is Coordinate {
@@ -22,6 +29,7 @@ function isValidCoord(c: Coordinate | null): c is Coordinate {
 export default function RequestPreview() {
   const start = useStore((s) => s.start);
   const dest = useStore((s) => s.dest);
+  const routingTarget = useStore((s) => s.routingTarget);
 
   if (!isValidCoord(start) || !isValidCoord(dest)) {
     return (
@@ -32,21 +40,26 @@ export default function RequestPreview() {
     );
   }
 
-  const osrmUrl = buildOsrmPreviewUrl(start, dest);
-  const valhallaJson = buildValhallaPreviewJson(start, dest);
+  const isProd = routingTarget === "prod";
+  const osrmUrl = isProd
+    ? buildProdOsrmPreviewUrl(start, dest)
+    : buildOsrmPreviewUrl(start, dest);
+  const valhallaPreview = isProd
+    ? buildProdValhallaPreviewUrl(start, dest)
+    : buildValhallaPreviewJson(start, dest);
 
   return (
     <div className="request-preview">
       <div className="request-preview__block">
-        <h4 className="request-preview__title">OSRM request</h4>
+        <h4 className="request-preview__title">{isProd ? "Prod OSRM request" : "OSRM request"}</h4>
         <pre className="request-preview__pre">
           <code className="request-preview__code">{osrmUrl}</code>
         </pre>
       </div>
       <div className="request-preview__block">
-        <h4 className="request-preview__title">Valhalla request body</h4>
+        <h4 className="request-preview__title">{isProd ? "Prod Valhalla request" : "Valhalla request body"}</h4>
         <pre className="request-preview__pre">
-          <code className="request-preview__code">{valhallaJson}</code>
+          <code className="request-preview__code">{valhallaPreview}</code>
         </pre>
       </div>
     </div>

@@ -177,7 +177,7 @@ describe("RawResponseInspector", () => {
     render(<RawResponseInspector engine="valhalla" />);
 
     expect(screen.getByTestId("raw-inspector-source-valhalla")).toHaveTextContent(
-      "Compare · Protobuf-derived",
+      "Compare · Local · Protobuf-derived",
     );
   });
 

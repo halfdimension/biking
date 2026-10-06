@@ -19,7 +19,13 @@ from fastapi import APIRouter, HTTPException
 
 from app import config
 from app.curlparse import CurlParseError, ParsedCurl, parse_curl
-from app.engines import EngineCallResult, call_engine, is_host_allowed, probe_engines
+from app.engines import (
+    EngineCallResult,
+    call_engine,
+    is_host_allowed,
+    probe_engines,
+    redact_sensitive,
+)
 from app.models import (
     CompareRequest,
     CompareResponse,
@@ -31,12 +37,19 @@ from app.models import (
     EngineDebugResult,
     EngineResult,
     HealthResponse,
+    RoutingTarget,
     OsrmRawRequest,
     ValhallaRawRequest,
     ValhallaTraceRequest,
     ValhallaTraceResponse,
 )
 from app.osrm import build_default_osrm_url, build_osrm_debug, normalize_osrm_response
+from app.prod import (
+    build_prod_osrm_url,
+    build_prod_valhalla_url,
+    extract_prod_osrm_response,
+    extract_prod_valhalla_response,
+)
 from app.valhalla import build_default_valhalla_body, normalize_valhalla_response
 from app.valhalla_pbf import (
     build_valhalla_debug,
@@ -207,7 +220,10 @@ def _handle_engine_call(
 
 
 async def _run_osrm(
-    start: Coordinate, dest: Coordinate, include_debug: bool = False
+    start: Coordinate,
+    dest: Coordinate,
+    include_debug: bool = False,
+    target: RoutingTarget = "local",
 ) -> _CompareOutcome:
     """Call OSRM with the canonical request and normalize into an envelope.
 
@@ -223,18 +239,41 @@ async def _run_osrm(
     into this engine's error envelope so the sibling is unaffected (Req 2.2,
     2.3, 17.13).
     """
-    url = build_default_osrm_url(start, dest)
-    result = await call_engine("GET", url)
+    if target == "prod":
+        token = config.MAPPLS_PROD_ACCESS_TOKEN
+        if not token:
+            return _CompareOutcome(result=_missing_prod_token_envelope("osrm"))
+        url = build_prod_osrm_url(start, dest, token)
+        result = await call_engine(
+            "GET", url, allowed_hosts=config.CANONICAL_PROD_ALLOWED_HOSTS
+        )
 
-    envelope = _handle_engine_call(
-        "osrm",
-        result,
-        lambda body: normalize_osrm_response(
-            body,
-            duration_ms=result.duration_ms,
-            http_status=result.http_status,
-        ),
-    )
+        def normalize_prod(body: Any) -> EngineResult:
+            extracted = extract_prod_osrm_response(body)
+            normalized = normalize_osrm_response(
+                extracted,
+                duration_ms=result.duration_ms,
+                http_status=result.http_status,
+            )
+            normalized.raw = body
+            return normalized
+
+        envelope = _handle_engine_call("osrm", result, normalize_prod)
+        envelope.raw = redact_sensitive(envelope.raw, [token])
+        for route in envelope.normalized_routes:
+            route.raw = redact_sensitive(route.raw, [token])
+    else:
+        url = build_default_osrm_url(start, dest)
+        result = await call_engine("GET", url)
+        envelope = _handle_engine_call(
+            "osrm",
+            result,
+            lambda body: normalize_osrm_response(
+                body,
+                duration_ms=result.duration_ms,
+                http_status=result.http_status,
+            ),
+        )
     debug = None
     if include_debug:
         body, decoded = _decode_json(result)
@@ -255,7 +294,10 @@ async def _run_osrm(
 
 
 async def _run_valhalla(
-    start: Coordinate, dest: Coordinate, include_debug: bool = False
+    start: Coordinate,
+    dest: Coordinate,
+    include_debug: bool = False,
+    target: RoutingTarget = "local",
 ) -> _CompareOutcome:
     """Call Valhalla with the canonical request and normalize into an envelope.
 
@@ -269,6 +311,32 @@ async def _run_valhalla(
     Never raises: guarded by the fan-out for defense-in-depth (Req 2.2, 2.3,
     17.13).
     """
+    if target == "prod":
+        token = config.MAPPLS_PROD_ACCESS_TOKEN
+        if not token:
+            return _CompareOutcome(result=_missing_prod_token_envelope("valhalla"))
+        url = build_prod_valhalla_url(start, dest, token)
+        result = await call_engine(
+            "GET", url, allowed_hosts=config.CANONICAL_PROD_ALLOWED_HOSTS
+        )
+
+        def normalize_prod(body: Any) -> EngineResult:
+            extracted = extract_prod_valhalla_response(body)
+            normalized = normalize_valhalla_response(
+                extracted,
+                duration_ms=result.duration_ms,
+                http_status=result.http_status,
+                request_units="kilometers",
+            )
+            normalized.raw = body
+            return normalized
+
+        envelope = _handle_engine_call("valhalla", result, normalize_prod)
+        envelope.raw = redact_sensitive(envelope.raw, [token])
+        for route in envelope.normalized_routes:
+            route.raw = redact_sensitive(route.raw, [token])
+        return _CompareOutcome(result=envelope)
+
     url = f"{config.VALHALLA_BASE_URL}/route"
     if not include_debug:
         body = build_default_valhalla_body(start, dest)
@@ -343,7 +411,27 @@ async def _run_valhalla(
     return _CompareOutcome(result=envelope, debug=debug)
 
 
-def _exception_envelope(engine: str, exc: BaseException) -> EngineResult:
+def _missing_prod_token_envelope(engine: str) -> EngineResult:
+    return EngineResult(
+        engine=engine,
+        status="error",
+        http_status=None,
+        duration_ms=0.0,
+        normalized_routes=[],
+        raw=None,
+        raw_source="engine-json",
+        warnings=[],
+        error=EngineError(
+            kind="invalid_request",
+            message="Production Mappls access token is not configured on the backend.",
+            detail=None,
+        ),
+    )
+
+
+def _exception_envelope(
+    engine: str, exc: BaseException, secret: str | None = None
+) -> EngineResult:
     """Convert an unexpected per-task exception into an error envelope.
 
     Defense-in-depth for the ``asyncio.gather(..., return_exceptions=True)``
@@ -363,7 +451,7 @@ def _exception_envelope(engine: str, exc: BaseException) -> EngineResult:
         error=EngineError(
             kind="invalid_response",
             message=f"Unexpected error while processing the {engine} response.",
-            detail=str(exc),
+            detail=redact_sensitive(str(exc), [secret] if secret else []),
         ),
     )
 
@@ -376,9 +464,9 @@ def _exception_envelope(engine: str, exc: BaseException) -> EngineResult:
 async def compare(request: CompareRequest) -> CompareResponse:
     """Fan out to both engines concurrently and return per-engine envelopes.
 
-    Normal mode only: the body carries start + dest coordinates ONLY, and the
-    backend always builds the canonical ``Default_OSRM_Request`` and
-    ``Default_Valhalla_Request`` itself (Req 2.1, 2.2).
+    Normal mode only: the body carries start/dest, an optional routing target,
+    and the debug opt-in. The backend always builds the canonical engine
+    requests itself (Req 2.1, 2.2).
 
     The two engine paths run concurrently via
     ``asyncio.gather(..., return_exceptions=True)``. Each path is
@@ -387,9 +475,10 @@ async def compare(request: CompareRequest) -> CompareResponse:
     engine's independent error envelope — so one engine failing NEVER aborts or
     alters the other (Req 2.4, 2.5, 2.7, 17.13).
     """
+    include_debug = request.include_debug and request.target == "local"
     osrm_outcome, valhalla_outcome = await asyncio.gather(
-        _run_osrm(request.start, request.dest, request.include_debug),
-        _run_valhalla(request.start, request.dest, request.include_debug),
+        _run_osrm(request.start, request.dest, include_debug, request.target),
+        _run_valhalla(request.start, request.dest, include_debug, request.target),
         return_exceptions=True,
     )
 
@@ -397,10 +486,18 @@ async def compare(request: CompareRequest) -> CompareResponse:
         osrm = osrm_outcome
     else:
         osrm = _CompareOutcome(
-            result=_exception_envelope("osrm", osrm_outcome),
+            result=_exception_envelope(
+                "osrm",
+                osrm_outcome,
+                (
+                    config.MAPPLS_PROD_ACCESS_TOKEN
+                    if request.target == "prod"
+                    else None
+                ),
+            ),
             debug=(
                 _debug_failure("osrm", "Unexpected OSRM processing failure.", str(osrm_outcome))
-                if request.include_debug
+                if include_debug
                 else None
             ),
         )
@@ -408,22 +505,31 @@ async def compare(request: CompareRequest) -> CompareResponse:
         valhalla = valhalla_outcome
     else:
         valhalla = _CompareOutcome(
-            result=_exception_envelope("valhalla", valhalla_outcome),
+            result=_exception_envelope(
+                "valhalla",
+                valhalla_outcome,
+                (
+                    config.MAPPLS_PROD_ACCESS_TOKEN
+                    if request.target == "prod"
+                    else None
+                ),
+            ),
             debug=(
                 _debug_failure(
                     "valhalla",
                     "Unexpected Valhalla processing failure.",
                     str(valhalla_outcome),
                 )
-                if request.include_debug
+                if include_debug
                 else None
             ),
         )
 
-    if request.include_debug:
+    if include_debug:
         return CompareResponse(
             osrm=osrm.result,
             valhalla=valhalla.result,
+            routing_target=request.target,
             debug=CompareDebug(
                 osrm=osrm.debug
                 or _debug_failure("osrm", "OSRM debug data is unavailable."),
@@ -431,7 +537,9 @@ async def compare(request: CompareRequest) -> CompareResponse:
                 or _debug_failure("valhalla", "Valhalla debug data is unavailable."),
             ),
         )
-    return CompareResponse(osrm=osrm.result, valhalla=valhalla.result)
+    return CompareResponse(
+        osrm=osrm.result, valhalla=valhalla.result, routing_target=request.target
+    )
 
 
 @router.post("/osrm/raw", response_model=EngineResult)

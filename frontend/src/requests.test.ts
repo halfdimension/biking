@@ -12,6 +12,8 @@ import {
   buildValhallaPreviewBody,
   buildValhallaPreviewJson,
   DEFAULT_OSRM_QUERY,
+  buildProdOsrmPreviewUrl,
+  buildProdValhallaPreviewUrl,
 } from "./requests";
 
 describe("isValidLat", () => {
@@ -133,5 +135,33 @@ describe("cross-language canonical request contract", () => {
     expect(JSON.parse(buildValhallaPreviewJson(start, dest))).toEqual(
       buildValhallaPreviewBody(start, dest),
     );
+  });
+});
+
+
+describe("production request previews", () => {
+  const start = { lat: 28.651770012429765, lon: 77.36783435642826 };
+  const dest = { lat: 28.631769137973578, lon: 77.11696030930938 };
+
+  it("shows the exact Prod OSRM semantics with a placeholder token", () => {
+    const url = buildProdOsrmPreviewUrl(start, dest);
+    expect(url).toContain("/advancedmaps/v1/<TOKEN>/route_adv/biking/");
+    expect(url).toContain(`${start.lon},${start.lat};${dest.lon},${dest.lat}`);
+    expect(url).toContain("steps=false");
+    expect(url).not.toContain("steps=true");
+    expect(url).toContain("geometries=polyline6");
+    expect(url).toContain("annotations=nodes,distance,duration,weight,speed,datasources");
+  });
+
+  it("shows Prod Valhalla query semantics without any real token", () => {
+    const url = buildProdValhallaPreviewUrl(start, dest);
+    expect(url).toContain("access_token=<TOKEN>");
+    expect(url).toContain("profile=biking");
+    const parsed = new URL(url.replace("<TOKEN>", "TEST_TOKEN_DO_NOT_USE"));
+    expect(parsed.searchParams.get("locations")).toBe(
+      `${start.lon},${start.lat};${dest.lon},${dest.lat}`,
+    );
+    expect(parsed.searchParams.get("date_time")).toBe('0,""');
+    expect(parsed.searchParams.get("speedTypes")).toBe("traffic");
   });
 });

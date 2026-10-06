@@ -126,6 +126,21 @@ describe("TraceInspector", () => {
     expect(screen.getByRole("button", { name: "Run Valhalla Trace" })).toBeDisabled();
   });
 
+  it("does not redirect Prod comparison routes into Local trace_attributes", () => {
+    act(() =>
+      useStore.setState({
+        results: { ...comparison(), routingTarget: "prod" },
+      }),
+    );
+    render(<TraceInspector />);
+
+    expect(
+      screen.getByText("Trace Inspector is Local-only. Run a Local comparison first."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run Valhalla Trace" })).toBeDisabled();
+    expect(screen.getByRole("heading", { name: /Local Valhalla/ })).toBeInTheDocument();
+  });
+
   it("populates the OSRM source selector and selects an alternate independently", async () => {
     act(() => useStore.setState({ results: comparison() }));
     render(<TraceInspector />);

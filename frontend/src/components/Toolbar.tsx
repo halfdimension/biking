@@ -28,7 +28,7 @@ function HealthIndicator({
       <span
         className={`health-dot health-dot--${status}`}
         aria-hidden="true"
-        data-testid={`health-dot-${name.toLowerCase()}`}
+        data-testid={`health-dot-${name.toLowerCase().replace(/^local /, "")}`}
       />
       <span>
         {name}: {HEALTH_LABEL[status]}
@@ -44,6 +44,8 @@ export default function Toolbar() {
   const compareStatus = useStore((s) => s.compareStatus);
   const lastError = useStore((s) => s.lastError);
   const health = useStore((s) => s.health);
+  const routingTarget = useStore((s) => s.routingTarget);
+  const setRoutingTarget = useStore((s) => s.setRoutingTarget);
   const edgeDebugEnabled = useStore((s) => s.edgeDebugEnabled);
   const setEdgeDebugEnabled = useStore((s) => s.setEdgeDebugEnabled);
 
@@ -54,6 +56,26 @@ export default function Toolbar() {
       <h1 className="toolbar__title">
         Bike Routing Comparison &amp; Debugging Dashboard
       </h1>
+
+      <div className="toolbar__target" aria-label="Routing target">
+        <span>Routing:</span>
+        <button
+          type="button"
+          aria-pressed={routingTarget === "local"}
+          className={routingTarget === "local" ? "toolbar__target-active" : ""}
+          onClick={() => setRoutingTarget("local")}
+        >
+          Local
+        </button>
+        <button
+          type="button"
+          aria-pressed={routingTarget === "prod"}
+          className={routingTarget === "prod" ? "toolbar__target-active" : ""}
+          onClick={() => setRoutingTarget("prod")}
+        >
+          Prod
+        </button>
+      </div>
 
       <button
         type="button"
@@ -68,6 +90,12 @@ export default function Toolbar() {
         type="button"
         className={`toolbar__debug-btn${edgeDebugEnabled ? " toolbar__debug-btn--active" : ""}`}
         aria-pressed={edgeDebugEnabled}
+        disabled={routingTarget === "prod"}
+        title={
+          routingTarget === "prod"
+            ? "Edge Debug is available for Local Valhalla only."
+            : undefined
+        }
         onClick={() => setEdgeDebugEnabled(!edgeDebugEnabled)}
       >
         Edge Debug: {edgeDebugEnabled ? "ON" : "OFF"}
@@ -106,8 +134,8 @@ export default function Toolbar() {
       <div className="toolbar__spacer" />
 
       <div className="health-indicators" aria-label="Engine health status">
-        <HealthIndicator name="OSRM" status={health.osrm} />
-        <HealthIndicator name="Valhalla" status={health.valhalla} />
+        <HealthIndicator name="Local OSRM" status={health.osrm} />
+        <HealthIndicator name="Local Valhalla" status={health.valhalla} />
       </div>
     </header>
   );

@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 
@@ -41,6 +41,69 @@ class HostNotAllowedError(Exception):
             f"host {host_port!r} is not in the allowlist "
             f"{sorted(config.ALLOWED_HOSTS)}"
         )
+
+
+def _url_contains_secret(url: str) -> bool:
+    try:
+        parts = urlsplit(url)
+        path_parts = parts.path.split("/")
+        has_token_path = any(
+            path_parts[index] == "v1"
+            and path_parts[index + 2] == "route_adv"
+            for index in range(len(path_parts) - 2)
+        )
+        has_token_query = any(
+            key.lower() == "access_token"
+            for key, _ in parse_qsl(parts.query, keep_blank_values=True)
+        )
+        return has_token_path or has_token_query
+    except (TypeError, ValueError):
+        return True
+
+
+def redact_url(url: str) -> str:
+    """Redact Mappls credentials while leaving ordinary Local URLs unchanged."""
+    if not _url_contains_secret(url):
+        return url
+    try:
+        parts = urlsplit(url)
+        path_parts = parts.path.split("/")
+        for index in range(len(path_parts) - 2):
+            if (
+                path_parts[index] == "v1"
+                and path_parts[index + 2] == "route_adv"
+            ):
+                path_parts[index + 1] = "<REDACTED>"
+        query = urlencode(
+            [
+                (key, "<REDACTED>" if key.lower() == "access_token" else value)
+                for key, value in parse_qsl(parts.query, keep_blank_values=True)
+            ],
+            doseq=True,
+            safe='<>,"',
+        )
+        return urlunsplit(
+            (parts.scheme, parts.netloc, "/".join(path_parts), query, parts.fragment)
+        )
+    except (TypeError, ValueError):
+        return "<REDACTED URL>"
+
+
+def redact_sensitive(value: object, secrets: list[str]) -> object:
+    """Recursively remove configured secret strings from response data."""
+    active = [secret for secret in secrets if secret]
+    if isinstance(value, str):
+        redacted = value
+        for secret in active:
+            redacted = redacted.replace(secret, "<REDACTED>")
+        return redacted
+    if isinstance(value, dict):
+        return {key: redact_sensitive(item, active) for key, item in value.items()}
+    if isinstance(value, list):
+        return [redact_sensitive(item, active) for item in value]
+    if isinstance(value, tuple):
+        return tuple(redact_sensitive(item, active) for item in value)
+    return value
 
 
 def _host_port(url: str) -> str:
@@ -72,6 +135,12 @@ def is_host_allowed(url: str) -> bool:
     before deciding whether to issue a request.
     """
     return _host_port(url) in config.ALLOWED_HOSTS
+
+
+def _is_host_allowed_for(url: str, allowed_hosts: set[str] | None) -> bool:
+    return _host_port(url) in (
+        config.LOCAL_RAW_ALLOWED_HOSTS if allowed_hosts is None else allowed_hosts
+    )
 
 
 @dataclass
@@ -142,6 +211,7 @@ async def request_engine(
     headers: dict[str, str] | None = None,
     timeout: float | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
+    allowed_hosts: set[str] | None = None,
 ) -> tuple[httpx.Response, float]:
     """Validate the host allowlist, then issue a timed request.
 
@@ -168,7 +238,7 @@ async def request_engine(
         httpx.HTTPError: Propagated transport/timeout errors (classified by the
             :func:`call_engine` layer).
     """
-    if not is_host_allowed(url):
+    if not _is_host_allowed_for(url, allowed_hosts):
         # Refuse without issuing any request (Req 10.4, 19.1).
         raise HostNotAllowedError(_host_port(url))
 
@@ -197,6 +267,7 @@ async def call_engine(
     headers: dict[str, str] | None = None,
     timeout: float | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
+    allowed_hosts: set[str] | None = None,
 ) -> EngineCallResult:
     """Run a wrapped engine call and classify the outcome — never raises.
 
@@ -227,6 +298,7 @@ async def call_engine(
             headers=headers,
             timeout=timeout,
             transport=transport,
+            allowed_hosts=allowed_hosts,
         )
     except HostNotAllowedError as exc:
         # Refused before any request — surface as an invalid_request error.
@@ -253,10 +325,10 @@ async def call_engine(
             error=EngineError(
                 kind="timeout",
                 message=(
-                    f"Request to {url} timed out after "
+                    f"Request to {redact_url(url)} timed out after "
                     f"{config.REQUEST_TIMEOUT_SECONDS if timeout is None else timeout}s."
                 ),
-                detail=str(exc),
+                detail=None if _url_contains_secret(url) else str(exc),
             ),
         )
     except httpx.HTTPError as exc:
@@ -269,8 +341,8 @@ async def call_engine(
             duration_ms=0.0,
             error=EngineError(
                 kind="unreachable",
-                message=f"Could not reach {url}.",
-                detail=str(exc),
+                message=f"Could not reach {redact_url(url)}.",
+                detail=None if _url_contains_secret(url) else str(exc),
             ),
         )
 
@@ -292,7 +364,7 @@ async def call_engine(
         duration_ms=duration_ms,
         error=EngineError(
             kind="http_error",
-            message=f"{url} returned HTTP {response.status_code}.",
+            message=f"{redact_url(url)} returned HTTP {response.status_code}.",
             detail=None,
         ),
     )

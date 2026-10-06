@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 # The two routing engines the dashboard compares (design Data Models).
 Engine = Literal["osrm", "valhalla"]
+RoutingTarget = Literal["local", "prod"]
 
 
 class _CamelModel(BaseModel):
@@ -154,6 +155,7 @@ class CompareResponse(_CamelModel):
 
     osrm: EngineResult
     valhalla: EngineResult
+    routing_target: RoutingTarget = Field(alias="routingTarget")
     debug: CompareDebug | None = None
 
 
@@ -169,6 +171,7 @@ class CompareRequest(_CamelModel):
     start: Coordinate
     dest: Coordinate
     include_debug: bool = Field(default=False, alias="includeDebug")
+    target: RoutingTarget = "local"
 
 
 class ValhallaTraceRequest(_CamelModel):
