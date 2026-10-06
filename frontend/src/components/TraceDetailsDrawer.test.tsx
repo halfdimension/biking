@@ -379,7 +379,7 @@ describe("Trace Inspector pinned-details drawer", () => {
     ]);
   });
 
-  it("enforces the responsive minimum and maximum pointer-drag heights", () => {
+  it("uses only the panel minimum and structural map minimum as drag bounds", () => {
     seedTraceDrawer({
       tracePinnedSegmentIds: [first.id],
       tracePinnedPoint: [77.01, 28.01],
@@ -400,9 +400,9 @@ describe("Trace Inspector pinned-details drawer", () => {
     fireEvent.pointerDown(handle, { pointerId: 2, clientY: 400 });
     fireEvent.pointerMove(handle, { pointerId: 2, clientY: -1000 });
     fireEvent.pointerUp(handle, { pointerId: 2, clientY: -1000 });
-    // min(65% of 600, 600 - 240px reserved map) = 360px.
-    expect(workspace.style.gridTemplateRows).toContain("360px");
-    expect(useStore.getState().traceDetailsExpandedHeight).toBe(360);
+    expect(workspace.style.gridTemplateRows).toContain("552px");
+    expect(useStore.getState().traceDetailsExpandedHeight).toBe(552);
+    expect(handle).toHaveAttribute("aria-valuemax", "552");
   });
 
   it("collapses to the compact row and restores the last manually selected height", () => {
@@ -440,13 +440,13 @@ describe("Trace Inspector pinned-details drawer", () => {
     })).toBeVisible();
   });
 
-  it("supports clamped keyboard resizing and clamps when the workspace shrinks", () => {
+  it("uses shared keyboard steps and restores a preference after shrink/regrow", () => {
     seedTraceDrawer({
       tracePinnedSegmentIds: [first.id],
       tracePinnedPoint: [77.01, 28.01],
       traceInspectorPinned: true,
       traceDetailsCollapsed: false,
-      traceDetailsExpandedHeight: 350,
+      traceDetailsExpandedHeight: 600,
     });
     render(<TraceInspector />);
     const layout = mockTraceWorkspaceHeight(700);
@@ -455,14 +455,17 @@ describe("Trace Inspector pinned-details drawer", () => {
     });
 
     fireEvent.keyDown(handle, { key: "ArrowUp" });
-    expect(useStore.getState().traceDetailsExpandedHeight).toBe(370);
+    expect(useStore.getState().traceDetailsExpandedHeight).toBe(624);
     fireEvent.keyDown(handle, { key: "ArrowDown" });
-    expect(useStore.getState().traceDetailsExpandedHeight).toBe(350);
+    expect(useStore.getState().traceDetailsExpandedHeight).toBe(600);
 
     layout.setWorkspaceHeight(500);
-    // min(65% of 500, 500 - 240px reserved map) = 260px.
-    expect(useStore.getState().traceDetailsExpandedHeight).toBe(260);
-    expect(layout.workspace.style.gridTemplateRows).toContain("260px");
+    expect(useStore.getState().traceDetailsExpandedHeight).toBe(600);
+    expect(layout.workspace.style.gridTemplateRows).toContain("452px");
+
+    layout.setWorkspaceHeight(700);
+    expect(useStore.getState().traceDetailsExpandedHeight).toBe(600);
+    expect(layout.workspace.style.gridTemplateRows).toContain("600px");
   });
 
   it("preserves a custom expanded height across a remount", () => {
@@ -536,8 +539,11 @@ describe("Trace Inspector analysis workspace", () => {
   });
 
   it("graph click opens exact Edge Details and Route Analysis restores its search", () => {
+    seedTraceDrawer({ traceDetailsExpandedHeight: 500 });
     render(<TraceInspector />);
+    const { workspace } = mockTraceWorkspaceHeight(700);
     fireEvent.click(screen.getByRole("tab", { name: "Route Analysis" }));
+    expect(workspace.style.gridTemplateRows).toContain("500px");
 
     fireEvent.change(
       screen.getByRole("combobox", { name: "Trace search field" }),
@@ -560,8 +566,11 @@ describe("Trace Inspector analysis workspace", () => {
     expect(screen.getByRole("tab", { name: "Edge Details" }))
       .toHaveAttribute("aria-selected", "true");
     expect(screen.getByTestId("trace-edge-details-body")).toBeVisible();
+    expect(workspace.style.gridTemplateRows).toContain("500px");
+    expect(useStore.getState().traceDetailsExpandedHeight).toBe(500);
 
     fireEvent.click(screen.getByRole("tab", { name: "Route Analysis" }));
+    expect(workspace.style.gridTemplateRows).toContain("500px");
     expect(useStore.getState().traceAnalysisExecutedSearch).toBe(search);
     expect(screen.getByLabelText("Trace match statistics")).toHaveTextContent(
       "2 matching segments",
@@ -572,7 +581,9 @@ describe("Trace Inspector analysis workspace", () => {
   });
 
   it("map pin switches from Route Analysis to expanded Edge Details", () => {
+    seedTraceDrawer({ traceDetailsExpandedHeight: 500 });
     render(<TraceInspector />);
+    const { workspace } = mockTraceWorkspaceHeight(700);
     fireEvent.click(screen.getByRole("tab", { name: "Route Analysis" }));
 
     act(() => {
@@ -586,6 +597,8 @@ describe("Trace Inspector analysis workspace", () => {
     expect(useStore.getState().traceLowerTab).toBe("edge-details");
     expect(useStore.getState().traceDetailsCollapsed).toBe(false);
     expect(useStore.getState().tracePinnedSegmentIds).toEqual([second.id]);
+    expect(useStore.getState().traceDetailsExpandedHeight).toBe(500);
+    expect(workspace.style.gridTemplateRows).toContain("500px");
     expect(screen.getByTestId("trace-edge-details-body")).toBeVisible();
   });
 });

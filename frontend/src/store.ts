@@ -240,6 +240,8 @@ export interface AppState {
   rightCollapsed: boolean;
   /** Bottom panel body hidden (only the tab strip remains) when true. */
   bottomCollapsed: boolean;
+  /** Preferred expanded comparison-panel height for this browser session. */
+  routeComparisonPanelHeight: number;
   /**
    * True while "Focus Map" is active — i.e. after the first Focus Map click and
    * before the restoring second click. Drives the two-state toolbar toggle.
@@ -337,6 +339,8 @@ export interface AppState {
   toggleRightCollapsed: () => void;
   /** Toggle the bottom panel body between shown and hidden (strip stays). */
   toggleBottomCollapsed: () => void;
+  /** Set the session-only preferred expanded comparison-panel height. */
+  setRouteComparisonPanelHeight: (height: number) => void;
   /**
    * Focus Map two-state toggle. When NOT focused, snapshot the current three
    * collapse booleans and collapse all three. When already focused, restore the
@@ -688,6 +692,7 @@ export const useStore = create<AppState>((set, get) => ({
       leftCollapsed: l.leftCollapsed,
       rightCollapsed: l.rightCollapsed,
       bottomCollapsed: l.bottomCollapsed,
+      routeComparisonPanelHeight: 280,
       mapFocused: l.mapFocused,
       layoutSnapshot: l.snapshot,
     };
@@ -1170,6 +1175,9 @@ export const useStore = create<AppState>((set, get) => ({
       persistLayout(next);
       return { bottomCollapsed: next.bottomCollapsed };
     }),
+
+  setRouteComparisonPanelHeight: (height) =>
+    set({ routeComparisonPanelHeight: height }),
 
   focusMap: () =>
     set((state) => {

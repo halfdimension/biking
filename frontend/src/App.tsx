@@ -8,7 +8,7 @@
  * is refreshed on mount (Req 16.5); the probe is resilient and never throws, so
  * the dashboard stays usable even when engines are unreachable.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import "./App.css";
 import Toolbar from "./components/Toolbar";
 import LeftSidebar from "./components/LeftSidebar";
@@ -23,6 +23,7 @@ type Screen = "comparison" | "trace";
 export default function App() {
   const refreshHealth = useStore((s) => s.refreshHealth);
   const [screen, setScreen] = useState<Screen>("comparison");
+  const comparisonWorkspaceRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     void refreshHealth();
@@ -51,12 +52,14 @@ export default function App() {
       {screen === "comparison" ? (
         <div className="comparison-screen">
           <Toolbar />
-          <div className="middle-row">
-            <LeftSidebar />
-            <MapView />
-            <RightSidebar />
+          <div className="comparison-workspace" ref={comparisonWorkspaceRef}>
+            <div className="middle-row">
+              <LeftSidebar />
+              <MapView />
+              <RightSidebar />
+            </div>
+            <BottomTabs workspaceRef={comparisonWorkspaceRef} />
           </div>
-          <BottomTabs />
         </div>
       ) : (
         <TraceInspector />

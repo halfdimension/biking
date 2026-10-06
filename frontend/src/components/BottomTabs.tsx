@@ -3,8 +3,9 @@
  * automatically when a map segment is pinned and the top drag handle resizes
  * the workspace without changing map state.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { useStore } from "../store";
+import { useVerticalPanelResize } from "../layout/useVerticalPanelResize";
 import ComparisonTable from "./ComparisonTable";
 import OsrmRawRequest from "./OsrmRawRequest";
 import ValhallaRawRequest from "./ValhallaRawRequest";
@@ -27,26 +28,40 @@ const TABS = [
 type Tab = (typeof TABS)[number];
 
 const MIN_PANEL_HEIGHT = 180;
-const MAX_PANEL_HEIGHT = 520;
 
-function clampedHeight(height: number): number {
-  const viewportMax =
-    typeof window === "undefined"
-      ? MAX_PANEL_HEIGHT
-      : Math.min(MAX_PANEL_HEIGHT, Math.round(window.innerHeight * 0.58));
-  return Math.max(MIN_PANEL_HEIGHT, Math.min(viewportMax, height));
-}
-
-export default function BottomTabs() {
+export default function BottomTabs({
+  workspaceRef,
+}: {
+  workspaceRef?: RefObject<HTMLDivElement | null>;
+}) {
   const [active, setActive] = useState<Tab>("Comparison");
-  const [panelHeight, setPanelHeight] = useState(280);
   const collapsed = useStore((s) => s.bottomCollapsed);
   const toggle = useStore((s) => s.toggleBottomCollapsed);
+  const preferredPanelHeight = useStore(
+    (s) => s.routeComparisonPanelHeight,
+  );
+  const setPreferredPanelHeight = useStore(
+    (s) => s.setRouteComparisonPanelHeight,
+  );
   const detailsPinned = useStore((s) => s.debugInspectorPinned);
   const edgeDetailsOpenRequestId = useStore((s) => s.edgeDetailsOpenRequestId);
   const wasPinned = useRef(false);
   const previousOpenRequestId = useRef(edgeDetailsOpenRequestId);
-  const dragStart = useRef<{ y: number; height: number } | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const {
+    liveHeight,
+    minimumHeight,
+    maximumHeight,
+    resizing,
+    resizeHandleProps,
+  } = useVerticalPanelResize({
+    workspaceRef: workspaceRef ?? panelRef,
+    panelRef,
+    preferredHeight: preferredPanelHeight,
+    panelMinimum: MIN_PANEL_HEIGHT,
+    onPreferredHeightChange: setPreferredPanelHeight,
+    bodyClassName: "is-resizing-bottom-panel",
+  });
 
   useEffect(() => {
     const explicitlyRequested =
@@ -59,38 +74,20 @@ export default function BottomTabs() {
     previousOpenRequestId.current = edgeDetailsOpenRequestId;
   }, [collapsed, detailsPinned, edgeDetailsOpenRequestId, toggle]);
 
-  useEffect(() => {
-    const onMove = (event: PointerEvent) => {
-      if (!dragStart.current) return;
-      const delta = dragStart.current.y - event.clientY;
-      setPanelHeight(clampedHeight(dragStart.current.height + delta));
-    };
-    const onUp = () => {
-      dragStart.current = null;
-      document.body.classList.remove("is-resizing-bottom-panel");
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      document.body.classList.remove("is-resizing-bottom-panel");
-    };
-  }, []);
-
   const selectTab = (tab: Tab) => {
     setActive(tab);
     if (collapsed) toggle();
   };
 
-  const adjustHeight = (delta: number) => {
-    setPanelHeight((height) => clampedHeight(height + delta));
-  };
-
   return (
     <div
-      className={"bottom-tabs" + (collapsed ? " bottom-tabs--collapsed" : "")}
-      style={collapsed ? undefined : { height: panelHeight }}
+      ref={panelRef}
+      className={
+        "bottom-tabs" +
+        (collapsed ? " bottom-tabs--collapsed" : "") +
+        (resizing ? " bottom-tabs--resizing" : "")
+      }
+      style={collapsed ? undefined : { height: liveHeight }}
     >
       {!collapsed ? (
         <div
@@ -98,18 +95,12 @@ export default function BottomTabs() {
           role="separator"
           aria-label="Resize bottom panel"
           aria-orientation="horizontal"
-          aria-valuemin={MIN_PANEL_HEIGHT}
-          aria-valuemax={MAX_PANEL_HEIGHT}
-          aria-valuenow={panelHeight}
+          aria-valuemin={Math.round(minimumHeight)}
+          aria-valuemax={Math.round(maximumHeight)}
+          aria-valuenow={Math.round(liveHeight)}
+          aria-valuetext={`${Math.round(liveHeight)} pixels`}
           tabIndex={0}
-          onPointerDown={(event) => {
-            dragStart.current = { y: event.clientY, height: panelHeight };
-            document.body.classList.add("is-resizing-bottom-panel");
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "ArrowUp") adjustHeight(24);
-            if (event.key === "ArrowDown") adjustHeight(-24);
-          }}
+          {...resizeHandleProps}
         >
           <span />
         </div>

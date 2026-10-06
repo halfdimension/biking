@@ -33,6 +33,22 @@ vi.mock("../api", () => ({
 // A shared spy on the mock map's resize so tests can assert it is called after
 // a layout change.
 const resizeSpy = vi.fn();
+class TestPointerEvent extends MouseEvent {
+  pointerId: number;
+
+  constructor(
+    type: string,
+    init: MouseEventInit & { pointerId?: number } = {},
+  ) {
+    super(type, init);
+    this.pointerId = init.pointerId ?? 0;
+  }
+}
+
+Object.defineProperty(window, "PointerEvent", {
+  configurable: true,
+  value: TestPointerEvent,
+});
 
 vi.mock("maplibre-gl", () => {
   class Map {
@@ -81,6 +97,39 @@ async function renderApp() {
   return utils;
 }
 
+function domRect(height: number): DOMRect {
+  return {
+    x: 0,
+    y: 0,
+    width: 1000,
+    height,
+    top: 0,
+    right: 1000,
+    bottom: height,
+    left: 0,
+    toJSON: () => ({}),
+  } as DOMRect;
+}
+
+function mockComparisonWorkspaceHeight(initialHeight: number) {
+  const workspace = document.querySelector(
+    ".comparison-workspace",
+  ) as HTMLDivElement;
+  let workspaceHeight = initialHeight;
+  Object.defineProperty(workspace, "getBoundingClientRect", {
+    configurable: true,
+    value: () => domRect(workspaceHeight),
+  });
+  fireEvent(window, new Event("resize"));
+  return {
+    workspace,
+    setWorkspaceHeight: (height: number) => {
+      workspaceHeight = height;
+      fireEvent(window, new Event("resize"));
+    },
+  };
+}
+
 /** Reset the layout slice to all-expanded before each test. */
 function resetLayout() {
   act(() => {
@@ -88,6 +137,7 @@ function resetLayout() {
       leftCollapsed: false,
       rightCollapsed: false,
       bottomCollapsed: false,
+      routeComparisonPanelHeight: 280,
       mapFocused: false,
       layoutSnapshot: null,
     });
@@ -213,10 +263,79 @@ describe("Bottom panel resize", () => {
     expect(screen.getByRole("separator", { name: "Resize bottom panel" }))
       .toHaveAttribute("aria-valuenow", "304");
   });
+
+  it("drags beyond the old caps up to the 48px structural map reserve", async () => {
+    await renderApp();
+    const { workspace } = mockComparisonWorkspaceHeight(900);
+    const handle = screen.getByRole("separator", { name: "Resize bottom panel" });
+
+    expect(handle).toHaveAttribute("aria-valuemax", "852");
+    fireEvent.pointerDown(handle, { pointerId: 1, clientY: 500 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientY: -1000 });
+    fireEvent.pointerUp(handle, { pointerId: 1, clientY: -1000 });
+
+    expect(workspace.querySelector<HTMLElement>(".bottom-tabs")?.style.height)
+      .toBe("852px");
+    expect(useStore.getState().routeComparisonPanelHeight).toBe(852);
+    expect(852).toBeGreaterThan(520);
+    expect(852).toBeGreaterThan(900 * 0.58);
+
+    fireEvent.pointerDown(handle, { pointerId: 2, clientY: 500 });
+    fireEvent.pointerMove(handle, { pointerId: 2, clientY: 2000 });
+    fireEvent.pointerUp(handle, { pointerId: 2, clientY: 2000 });
+    expect(useStore.getState().routeComparisonPanelHeight).toBe(180);
+    expect(api.compare).not.toHaveBeenCalled();
+  });
+
+  it("clamps only the live height on shrink and restores the preference on regrow", async () => {
+    useStore.setState({ routeComparisonPanelHeight: 700 });
+    await renderApp();
+    const layout = mockComparisonWorkspaceHeight(900);
+    const panel = layout.workspace.querySelector<HTMLElement>(".bottom-tabs");
+    expect(panel?.style.height).toBe("700px");
+
+    layout.setWorkspaceHeight(500);
+    expect(panel?.style.height).toBe("452px");
+    expect(useStore.getState().routeComparisonPanelHeight).toBe(700);
+
+    layout.setWorkspaceHeight(900);
+    expect(panel?.style.height).toBe("700px");
+    expect(useStore.getState().routeComparisonPanelHeight).toBe(700);
+  });
+
+  it("keeps the comparison preference through collapse, pin-open, and navigation", async () => {
+    useStore.setState({ routeComparisonPanelHeight: 700 });
+    await renderApp();
+    mockComparisonWorkspaceHeight(900);
+
+    fireEvent.click(screen.getByTestId("collapse-bottom"));
+    act(() => {
+      useStore.setState((state) => ({
+        edgeDetailsOpenRequestId: state.edgeDetailsOpenRequestId + 1,
+      }));
+    });
+    expect(useStore.getState().bottomCollapsed).toBe(false);
+    expect(useStore.getState().routeComparisonPanelHeight).toBe(700);
+    expect(screen.getByRole("separator", { name: "Resize bottom panel" }))
+      .toHaveAttribute("aria-valuenow", "700");
+
+    fireEvent.click(screen.getByRole("button", { name: "Trace Inspector" }));
+    fireEvent.click(screen.getByRole("button", { name: "Route Comparison" }));
+    mockComparisonWorkspaceHeight(900);
+    expect(screen.getByRole("separator", { name: "Resize bottom panel" }))
+      .toHaveAttribute("aria-valuenow", "700");
+  });
+
+  it("keeps the comparison height session-only", () => {
+    useStore.getState().setRouteComparisonPanelHeight(640);
+    expect(useStore.getState().routeComparisonPanelHeight).toBe(640);
+    expect(localStorage.getItem("biking.layout.v1")).toBeNull();
+  });
 });
 
 describe("Focus Map", () => {
   it("first click collapses all three; second click restores all-expanded", async () => {
+    useStore.setState({ routeComparisonPanelHeight: 700 });
     await renderApp();
     const btn = screen.getByTestId("focus-map");
 
@@ -235,6 +354,7 @@ describe("Focus Map", () => {
     expect(s.rightCollapsed).toBe(false);
     expect(s.bottomCollapsed).toBe(false);
     expect(s.mapFocused).toBe(false);
+    expect(s.routeComparisonPanelHeight).toBe(700);
     expect(s.layoutSnapshot).toBeNull();
   });
 

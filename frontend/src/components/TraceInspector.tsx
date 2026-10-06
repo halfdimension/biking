@@ -1,13 +1,13 @@
 import {
-  useCallback,
   useEffect,
   useMemo,
   useRef,
-  useState,
   type CSSProperties,
-  type KeyboardEvent as ReactKeyboardEvent,
-  type PointerEvent as ReactPointerEvent,
 } from "react";
+import {
+  STRUCTURAL_MAP_MIN_HEIGHT,
+  useVerticalPanelResize,
+} from "../layout/useVerticalPanelResize";
 import { useStore } from "../store";
 import type { CompareDebug } from "../types";
 import EdgeDetailsPanel from "./EdgeDetailsPanel";
@@ -16,32 +16,6 @@ import TraceRouteAnalysis from "./TraceRouteAnalysis";
 
 export const TRACE_DETAILS_DEFAULT_HEIGHT = 180;
 export const TRACE_DETAILS_MIN_HEIGHT = 140;
-export const TRACE_MAP_MIN_HEIGHT = 240;
-export const TRACE_DETAILS_MAX_FRACTION = 0.65;
-export const TRACE_DETAILS_KEYBOARD_STEP = 20;
-
-export function maximumTraceDetailsHeight(workspaceHeight: number): number {
-  const fractionalMaximum = Math.floor(
-    workspaceHeight * TRACE_DETAILS_MAX_FRACTION,
-  );
-  const mapPreservingMaximum = Math.floor(
-    workspaceHeight - TRACE_MAP_MIN_HEIGHT,
-  );
-  return Math.max(
-    TRACE_DETAILS_MIN_HEIGHT,
-    Math.min(fractionalMaximum, mapPreservingMaximum),
-  );
-}
-
-export function clampTraceDetailsHeight(
-  height: number,
-  workspaceHeight: number,
-): number {
-  return Math.max(
-    TRACE_DETAILS_MIN_HEIGHT,
-    Math.min(maximumTraceDetailsHeight(workspaceHeight), height),
-  );
-}
 
 export default function TraceInspector() {
   const results = useStore((state) => state.results);
@@ -61,21 +35,6 @@ export default function TraceInspector() {
   const clearPin = useStore((state) => state.clearTracePin);
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const detailsRef = useRef<HTMLElement | null>(null);
-  const dragStartRef = useRef<{
-    pointerId: number;
-    clientY: number;
-    height: number;
-  } | null>(null);
-  const preferredHeightRef = useRef(preferredDetailsHeight);
-  const liveHeightRef = useRef(preferredDetailsHeight);
-  const [liveDetailsHeight, setLiveDetailsHeight] = useState(
-    preferredDetailsHeight,
-  );
-  const [maxDetailsHeight, setMaxDetailsHeight] = useState(
-    preferredDetailsHeight,
-  );
-  const [resizingDetails, setResizingDetails] = useState(false);
-  const [layoutRevision, setLayoutRevision] = useState(0);
   const toggleDetails = useStore((state) => state.toggleTraceDetailsCollapsed);
   const setPreferredDetailsHeight = useStore(
     (state) => state.setTraceDetailsExpandedHeight,
@@ -85,6 +44,22 @@ export default function TraceInspector() {
   const setLowerTab = useStore((state) => state.setTraceLowerTab);
   const detailsCompact =
     detailsCollapsed || (lowerTab === "edge-details" && !pinned);
+  const {
+    liveHeight: liveDetailsHeight,
+    minimumHeight: minimumDetailsHeight,
+    maximumHeight: maximumDetailsHeight,
+    resizing: resizingDetails,
+    layoutRevision,
+    resizeHandleProps,
+  } = useVerticalPanelResize({
+    workspaceRef,
+    panelRef: detailsRef,
+    preferredHeight: preferredDetailsHeight,
+    panelMinimum: TRACE_DETAILS_MIN_HEIGHT,
+    onPreferredHeightChange: setPreferredDetailsHeight,
+    disabled: detailsCompact,
+    bodyClassName: "is-resizing-trace-details",
+  });
 
   const osrmRoutes = results?.osrm.normalizedRoutes ?? [];
   const sourceRoute =
@@ -123,124 +98,11 @@ export default function TraceInspector() {
     }
   }, [osrmRoutes, setSource, sourceRouteId]);
 
-  useEffect(() => {
-    preferredHeightRef.current = preferredDetailsHeight;
-    if (!dragStartRef.current) {
-      liveHeightRef.current = preferredDetailsHeight;
-      setLiveDetailsHeight(preferredDetailsHeight);
-    }
-  }, [preferredDetailsHeight]);
-
-  const updateLiveDetailsHeight = useCallback((requestedHeight: number) => {
-    const workspaceHeight =
-      workspaceRef.current?.getBoundingClientRect().height ?? 0;
-    const nextHeight = workspaceHeight > 0
-      ? clampTraceDetailsHeight(requestedHeight, workspaceHeight)
-      : Math.max(TRACE_DETAILS_MIN_HEIGHT, requestedHeight);
-    if (workspaceHeight > 0) {
-      setMaxDetailsHeight(maximumTraceDetailsHeight(workspaceHeight));
-    }
-    liveHeightRef.current = nextHeight;
-    setLiveDetailsHeight(nextHeight);
-    return nextHeight;
-  }, []);
-
-  const commitDetailsHeight = useCallback((requestedHeight: number) => {
-    const nextHeight = updateLiveDetailsHeight(requestedHeight);
-    preferredHeightRef.current = nextHeight;
-    setPreferredDetailsHeight(nextHeight);
-    setLayoutRevision((revision) => revision + 1);
-  }, [setPreferredDetailsHeight, updateLiveDetailsHeight]);
-
-  useEffect(() => {
-    const workspace = workspaceRef.current;
-    if (!workspace) return;
-
-    const clampRememberedHeight = () => {
-      if (dragStartRef.current) return;
-      const workspaceHeight = workspace.getBoundingClientRect().height;
-      if (workspaceHeight <= 0) return;
-      const nextMaximum = maximumTraceDetailsHeight(workspaceHeight);
-      setMaxDetailsHeight(nextMaximum);
-      const currentHeight = preferredHeightRef.current;
-      const nextHeight = clampTraceDetailsHeight(currentHeight, workspaceHeight);
-      if (nextHeight !== currentHeight) {
-        preferredHeightRef.current = nextHeight;
-        liveHeightRef.current = nextHeight;
-        setLiveDetailsHeight(nextHeight);
-        setPreferredDetailsHeight(nextHeight);
-        setLayoutRevision((revision) => revision + 1);
-      }
-    };
-
-    const observer = new ResizeObserver(clampRememberedHeight);
-    observer.observe(workspace);
-    window.addEventListener("resize", clampRememberedHeight);
-    clampRememberedHeight();
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", clampRememberedHeight);
-      document.body.classList.remove("is-resizing-trace-details");
-    };
-  }, [setPreferredDetailsHeight]);
-
-  const startDetailsResize = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (detailsCompact) return;
-    const workspaceHeight =
-      workspaceRef.current?.getBoundingClientRect().height ?? 0;
-    if (workspaceHeight > 0) {
-      setMaxDetailsHeight(maximumTraceDetailsHeight(workspaceHeight));
-    }
-    const renderedHeight =
-      detailsRef.current?.getBoundingClientRect().height || liveHeightRef.current;
-    dragStartRef.current = {
-      pointerId: event.pointerId,
-      clientY: event.clientY,
-      height: renderedHeight,
-    };
-    liveHeightRef.current = renderedHeight;
-    setLiveDetailsHeight(renderedHeight);
-    setResizingDetails(true);
-    document.body.classList.add("is-resizing-trace-details");
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-    event.preventDefault();
-  };
-
-  const moveDetailsResize = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const start = dragStartRef.current;
-    if (!start || start.pointerId !== event.pointerId) return;
-    updateLiveDetailsHeight(start.height + start.clientY - event.clientY);
-    event.preventDefault();
-  };
-
-  const finishDetailsResize = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const start = dragStartRef.current;
-    if (!start || start.pointerId !== event.pointerId) return;
-    dragStartRef.current = null;
-    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    setResizingDetails(false);
-    document.body.classList.remove("is-resizing-trace-details");
-    commitDetailsHeight(liveHeightRef.current);
-  };
-
-  const handleResizeKeyDown = (
-    event: ReactKeyboardEvent<HTMLDivElement>,
-  ) => {
-    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
-    event.preventDefault();
-    const delta = event.key === "ArrowUp"
-      ? TRACE_DETAILS_KEYBOARD_STEP
-      : -TRACE_DETAILS_KEYBOARD_STEP;
-    commitDetailsHeight(liveHeightRef.current + delta);
-  };
-
   const workspaceStyle: CSSProperties | undefined = detailsCompact
     ? undefined
     : {
         gridTemplateRows:
-          `minmax(${TRACE_MAP_MIN_HEIGHT}px, 1fr) ${liveDetailsHeight}px`,
+          `minmax(${STRUCTURAL_MAP_MIN_HEIGHT}px, 1fr) ${liveDetailsHeight}px`,
       };
 
   return (
@@ -348,17 +210,13 @@ export default function TraceInspector() {
               role="separator"
               aria-label="Resize pinned trace edge details"
               aria-orientation="horizontal"
-              aria-valuemin={TRACE_DETAILS_MIN_HEIGHT}
-              aria-valuemax={Math.round(maxDetailsHeight)}
+              aria-valuemin={Math.round(minimumDetailsHeight)}
+              aria-valuemax={Math.round(maximumDetailsHeight)}
               aria-valuenow={Math.round(liveDetailsHeight)}
               aria-valuetext={`${Math.round(liveDetailsHeight)} pixels`}
               tabIndex={0}
               title="Drag to resize pinned trace edge details"
-              onPointerDown={startDetailsResize}
-              onPointerMove={moveDetailsResize}
-              onPointerUp={finishDetailsResize}
-              onPointerCancel={finishDetailsResize}
-              onKeyDown={handleResizeKeyDown}
+              {...resizeHandleProps}
             >
               <span />
             </div>
@@ -438,4 +296,3 @@ export default function TraceInspector() {
     </main>
   );
 }
-
