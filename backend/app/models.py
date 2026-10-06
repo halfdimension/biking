@@ -103,6 +103,9 @@ class EngineResult(_CamelModel):
     duration_ms: float = Field(alias="durationMs")
     normalized_routes: list[NormalizedRoute] = Field(alias="normalizedRoutes")
     raw: Any | None = None
+    raw_source: Literal["engine-json", "protobuf-derived"] = Field(
+        default="engine-json", alias="rawSource"
+    )
     warnings: list[RouteWarning] = Field(default_factory=list)
     error: EngineError | None = None
 

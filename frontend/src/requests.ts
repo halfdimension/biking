@@ -66,6 +66,8 @@ export function buildValhallaPreviewBody(
   alternates: number;
   shape_format: string;
   directions_options: { units: string };
+  costing_options: { motorcycle: { speed_types: string[] } };
+  date_time: { type: number };
 } {
   return {
     locations: [
@@ -76,6 +78,8 @@ export function buildValhallaPreviewBody(
     alternates: 10,
     shape_format: "polyline6",
     directions_options: { units: "kilometers" },
+    costing_options: { motorcycle: { speed_types: ["current"] } },
+    date_time: { type: 0 },
   };
 }
 

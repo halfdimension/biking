@@ -110,6 +110,7 @@ def _no_route_result(
         duration_ms=duration_ms,
         normalized_routes=[],
         raw=raw,
+        raw_source="engine-json",
         warnings=[],
         error=EngineError(kind="no_route", message=message, detail=None),
     )
@@ -233,6 +234,7 @@ def normalize_osrm_response(
         duration_ms=duration_ms,
         normalized_routes=normalized_routes,
         raw=raw,
+        raw_source="engine-json",
         warnings=warnings,
         error=None,
     )

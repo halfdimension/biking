@@ -4,12 +4,14 @@
  * params, and the canonical Valhalla body shape/options.
  */
 import { describe, it, expect } from "vitest";
+import canonicalRequestDefaults from "../../shared/canonical_request_defaults.json";
 import {
   isValidLat,
   isValidLon,
   buildOsrmPreviewUrl,
   buildValhallaPreviewBody,
   buildValhallaPreviewJson,
+  DEFAULT_OSRM_QUERY,
 } from "./requests";
 
 describe("isValidLat", () => {
@@ -106,5 +108,30 @@ describe("buildValhallaPreviewBody", () => {
     const json = buildValhallaPreviewJson(start, dest);
     expect(json).toBe(JSON.stringify(buildValhallaPreviewBody(start, dest), null, 2));
     expect(JSON.parse(json).costing).toBe("motorcycle");
+  });
+});
+
+describe("cross-language canonical request contract", () => {
+  const start = { lat: 28.78447495380769, lon: 76.87892122549387 };
+  const dest = { lat: 28.207132203283837, lon: 77.45894473456683 };
+
+  it("keeps the frontend OSRM query byte-identical to the backend contract", () => {
+    expect(DEFAULT_OSRM_QUERY).toBe(canonicalRequestDefaults.osrmQuery);
+    expect(buildOsrmPreviewUrl(start, dest)).toBe(
+      `http://localhost:5000/route/v1/biking/${start.lon},${start.lat};${dest.lon},${dest.lat}?${canonicalRequestDefaults.osrmQuery}`,
+    );
+  });
+
+  it("keeps the parsed Valhalla preview semantically identical to the backend contract", () => {
+    expect(buildValhallaPreviewBody(start, dest)).toEqual({
+      locations: [
+        { lat: start.lat, lon: start.lon, type: "break" },
+        { lat: dest.lat, lon: dest.lon, type: "break" },
+      ],
+      ...canonicalRequestDefaults.valhallaOptions,
+    });
+    expect(JSON.parse(buildValhallaPreviewJson(start, dest))).toEqual(
+      buildValhallaPreviewBody(start, dest),
+    );
   });
 });

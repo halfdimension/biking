@@ -65,6 +65,7 @@ const RESET = {
   osrmRawState: { status: "idle" as const, result: null, error: null },
   valhallaRawState: { status: "idle" as const, result: null, error: null },
   compareStatus: "idle" as const,
+  latestResponseSource: { osrm: null, valhalla: null },
 };
 
 beforeEach(() => {
@@ -151,6 +152,7 @@ describe("RawResponseInspector", () => {
         result: okResult("osrm", { code: "Ok", from_raw: true }),
         error: null,
       },
+      latestResponseSource: { osrm: "raw", valhalla: null },
     });
     render(<RawResponseInspector engine="osrm" />);
 
@@ -159,6 +161,24 @@ describe("RawResponseInspector", () => {
     );
     expect(screen.getByText("from_raw")).toBeInTheDocument();
     expect(screen.queryByText("from_compare")).not.toBeInTheDocument();
+  });
+
+  it("labels a protobuf-derived Valhalla Compare response explicitly", () => {
+    useStore.setState({
+      results: {
+        osrm: okResult("osrm", { code: "Ok" }),
+        valhalla: {
+          ...okResult("valhalla", { directions: {}, trip: {} }),
+          rawSource: "protobuf-derived",
+        },
+      },
+      latestResponseSource: { osrm: "compare", valhalla: "compare" },
+    });
+    render(<RawResponseInspector engine="valhalla" />);
+
+    expect(screen.getByTestId("raw-inspector-source-valhalla")).toHaveTextContent(
+      "Compare · Protobuf-derived",
+    );
   });
 
   it("shows an error block AND the raw body when an errored result carries a body (Req 11.4)", () => {

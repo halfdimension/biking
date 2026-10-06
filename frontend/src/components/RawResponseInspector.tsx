@@ -33,9 +33,16 @@ const ENGINE_NAME: Record<Engine, string> = {
   valhalla: "Valhalla",
 };
 
-function sourceLabel(source: ResponseSource): string | null {
+function sourceLabel(
+  source: ResponseSource,
+  rawSource: "engine-json" | "protobuf-derived" | undefined,
+): string | null {
   if (source === "raw") return "Advanced raw";
-  if (source === "compare") return "Compare";
+  if (source === "compare") {
+    return rawSource === "protobuf-derived"
+      ? "Compare · Protobuf-derived"
+      : "Compare";
+  }
   return null;
 }
 
@@ -44,9 +51,16 @@ export default function RawResponseInspector({ engine }: { engine: Engine }) {
   const osrmRawState = useStore((s) => s.osrmRawState);
   const valhallaRawState = useStore((s) => s.valhallaRawState);
   const compareStatus = useStore((s) => s.compareStatus);
+  const latestResponseSource = useStore((s) => s.latestResponseSource);
 
   const resp = selectEngineResponse(
-    { results, osrmRawState, valhallaRawState, compareStatus },
+    {
+      results,
+      osrmRawState,
+      valhallaRawState,
+      compareStatus,
+      latestResponseSource,
+    },
     engine,
   );
 
@@ -99,7 +113,7 @@ export default function RawResponseInspector({ engine }: { engine: Engine }) {
     );
   }
 
-  const src = sourceLabel(resp.source);
+  const src = sourceLabel(resp.source, resp.result?.rawSource);
   const isError = resp.status === "error";
 
   return (

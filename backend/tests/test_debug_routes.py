@@ -214,6 +214,7 @@ def test_valhalla_directions_normalize_and_trip_edges_slice_inclusively() -> Non
     debug = build_valhalla_debug(api)
 
     route = result.normalized_routes[0]
+    assert result.raw_source == "protobuf-derived"
     assert route.coordinates == [(77.0, 12.0), (77.1, 12.1), (77.2, 12.2)]
     assert route.distance_meters == pytest.approx(1250.0)
     assert route.duration_seconds == 90.0
@@ -329,6 +330,7 @@ def test_compare_debug_uses_one_valhalla_pbf_route_call(
     assert "json" not in calls[1][1]
     assert isinstance(calls[1][1]["content"], bytes)
     assert data["valhalla"]["normalizedRoutes"]
+    assert data["valhalla"]["rawSource"] == "protobuf-derived"
     assert data["debug"]["osrm"]["status"] == "ok"
     assert data["debug"]["valhalla"]["status"] == "ok"
     assert len(data["debug"]["valhalla"]["segments"]) == 2

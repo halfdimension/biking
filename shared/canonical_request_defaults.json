@@ -1,0 +1,21 @@
+{
+  "osrmQuery": "overview=full&geometries=polyline6&alternatives=true&annotations=nodes,distance,duration,weight,speed,datasources&steps=true",
+  "valhallaOptions": {
+    "costing": "motorcycle",
+    "alternates": 10,
+    "shape_format": "polyline6",
+    "directions_options": {
+      "units": "kilometers"
+    },
+    "costing_options": {
+      "motorcycle": {
+        "speed_types": [
+          "current"
+        ]
+      }
+    },
+    "date_time": {
+      "type": 0
+    }
+  }
+}

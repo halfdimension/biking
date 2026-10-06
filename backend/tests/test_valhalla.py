@@ -101,6 +101,10 @@ def test_build_default_valhalla_body_canonical_shape() -> None:
     assert body["alternates"] == 10
     assert body["shape_format"] == "polyline6"
     assert body["directions_options"] == {"units": "kilometers"}
+    assert body["costing_options"] == {
+        "motorcycle": {"speed_types": ["current"]}
+    }
+    assert body["date_time"] == {"type": 0}
     # locations use separate lat/lon fields (NOT lon,lat URL order) + break type.
     assert body["locations"] == [
         {"lat": 12.9, "lon": 77.6, "type": "break"},

@@ -100,6 +100,7 @@ function resetStore() {
     routes: [],
     osrmRawState: { status: "idle", result: null, error: null },
     valhallaRawState: { status: "idle", result: null, error: null },
+    latestResponseSource: { osrm: null, valhalla: null },
     curlImportState: { status: "idle", engine: null, result: null, error: null },
     visibility: {},
     selectedRouteId: null,
@@ -156,6 +157,10 @@ describe("store", () => {
       expect(state.compareStatus).toBe("done");
       expect(state.comparisonResultRevision).toBe(1);
       expect(state.lastError).toBeNull();
+      expect(state.latestResponseSource).toEqual({
+        osrm: "compare",
+        valhalla: "compare",
+      });
       // Visibility all true for exactly the returned ids.
       expect(Object.keys(state.visibility).sort()).toEqual([...ALL_IDS].sort());
       expect(Object.values(state.visibility).every((v) => v === true)).toBe(true);
@@ -309,6 +314,7 @@ describe("store", () => {
       expect(state.osrmRawState.status).toBe("done");
       expect(state.osrmRawState.result?.normalizedRoutes).toHaveLength(2);
       expect(state.osrmRawState.error).toBeNull();
+      expect(state.latestResponseSource.osrm).toBe("raw");
       // Routes surfaced on the render slice, all visible.
       expect(state.routes.map((r) => r.id)).toEqual(["osrm:0", "osrm:1"]);
       expect(Object.values(state.visibility).every((v) => v === true)).toBe(true);
@@ -358,6 +364,7 @@ describe("store", () => {
       );
       expect(state.valhallaRawState.status).toBe("done");
       expect(state.valhallaRawState.result?.normalizedRoutes).toHaveLength(2);
+      expect(state.latestResponseSource.valhalla).toBe("raw");
       expect(state.routes.map((r) => r.id)).toEqual([
         "valhalla:0",
         "valhalla:1",

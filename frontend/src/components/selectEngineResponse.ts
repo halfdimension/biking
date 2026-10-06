@@ -9,11 +9,10 @@
  *   - Normal Compare: `results.osrm` / `results.valhalla` — the per-engine
  *     envelope from the last `POST /api/compare`.
  *
- * Rule (simple + deterministic): prefer the Advanced raw result when the user
- * has actually sent a raw request for that engine (its status is "done" or
- * "error"); otherwise fall back to the Normal Compare envelope. This means a
- * fresh raw send takes over that engine's tab, while an untouched raw slice
- * (idle) leaves the Compare result visible.
+ * The store records which response-producing action was initiated most recently
+ * for each engine. That source owns the tab even when an older result remains in
+ * the other isolated slice, preventing a stale Advanced result from masking a
+ * later Compare (and vice versa).
  */
 import type { AppState, RawStatus } from "../store";
 import type { Engine, EngineError, EngineResult } from "../types";
@@ -77,12 +76,55 @@ function fromResult(
 export function selectEngineResponse(
   state: Pick<
     AppState,
-    "results" | "osrmRawState" | "valhallaRawState" | "compareStatus"
+    | "results"
+    | "osrmRawState"
+    | "valhallaRawState"
+    | "compareStatus"
+    | "latestResponseSource"
   >,
   engine: Engine,
 ): SelectedEngineResponse {
   const rawState =
     engine === "osrm" ? state.osrmRawState : state.valhallaRawState;
+  const preferredSource = state.latestResponseSource[engine];
+
+  // A newer Compare owns the tab even when the isolated raw slice still holds
+  // an older Advanced response.
+  if (preferredSource === "compare") {
+    if (state.compareStatus === "loading") {
+      return { ...EMPTY, source: "compare", status: "loading" };
+    }
+    const compare = state.results ? state.results[engine] : null;
+    if (compare) {
+      const status: RawStatus = compare.status === "error" ? "error" : "done";
+      return fromResult("compare", status, compare, null);
+    }
+    return EMPTY;
+  }
+
+  // A newer Advanced send owns the tab, including its loading/transport-error
+  // states, regardless of an older Compare envelope.
+  if (preferredSource === "raw") {
+    if (rawState.status === "loading") {
+      return { ...EMPTY, source: "raw", status: "loading" };
+    }
+    if (rawState.status === "error" && !rawState.result) {
+      return {
+        ...EMPTY,
+        source: "raw",
+        status: "error",
+        rawStateError: rawState.error,
+      };
+    }
+    if (rawState.result) {
+      const status: RawStatus =
+        rawState.result.status === "error" ? "error" : "done";
+      return fromResult("raw", status, rawState.result, rawState.error);
+    }
+    return EMPTY;
+  }
+
+  // Legacy/unseeded state fallback: preserve the original deterministic rule.
 
   // 1) A raw send is in flight: show a loading state for this engine's tab.
   if (rawState.status === "loading") {

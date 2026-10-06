@@ -119,6 +119,7 @@ def normalize_valhalla_pbf_response(
             duration_ms=duration_ms,
             normalized_routes=[],
             raw=raw,
+            raw_source="protobuf-derived",
             warnings=[],
             error=EngineError(
                 kind="no_route",
@@ -212,6 +213,7 @@ def normalize_valhalla_pbf_response(
         duration_ms=duration_ms,
         normalized_routes=normalized_routes,
         raw=raw,
+        raw_source="protobuf-derived",
         warnings=warnings,
         error=None,
     )

@@ -170,6 +170,7 @@ def test_compare_isolates_valhalla_failure_from_osrm_success(
     assert data["osrm"]["status"] == "ok"
     assert len(data["osrm"]["normalizedRoutes"]) >= 1
     assert data["osrm"]["normalizedRoutes"][0]["engine"] == "osrm"
+    assert data["osrm"]["rawSource"] == "engine-json"
 
     # Valhalla failed independently with the classified unreachable error.
     assert data["valhalla"]["status"] == "error"
@@ -194,6 +195,7 @@ def test_compare_isolates_osrm_failure_from_valhalla_success(
     assert data["valhalla"]["status"] == "ok"
     assert len(data["valhalla"]["normalizedRoutes"]) >= 1
     assert data["valhalla"]["normalizedRoutes"][0]["engine"] == "valhalla"
+    assert data["valhalla"]["rawSource"] == "engine-json"
 
     # OSRM failed independently with the classified unreachable error.
     assert data["osrm"]["status"] == "error"

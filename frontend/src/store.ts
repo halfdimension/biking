@@ -165,6 +165,8 @@ export interface AppState {
   // (Req 17.13). Named `*State` to avoid colliding with the api functions.
   osrmRawState: RawRequestState;
   valhallaRawState: RawRequestState;
+  /** Most recently initiated response-producing action for each engine. */
+  latestResponseSource: Record<Engine, "compare" | "raw" | null>;
 
   // Curl-import results (Req 10). Isolated from Normal-mode Compare and from the
   // raw-request slices so an import failure never affects them (error
@@ -656,6 +658,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   osrmRawState: IDLE_RAW,
   valhallaRawState: IDLE_RAW,
+  latestResponseSource: { osrm: null, valhalla: null },
 
   curlImportState: IDLE_CURL_IMPORT,
 
@@ -726,7 +729,11 @@ export const useStore = create<AppState>((set, get) => ({
       });
       return;
     }
-    set({ compareStatus: "loading", lastError: null });
+    set({
+      compareStatus: "loading",
+      lastError: null,
+      latestResponseSource: { osrm: "compare", valhalla: "compare" },
+    });
     try {
       const results = edgeDebugEnabled
         ? await api.compare(start, dest, true)
@@ -1039,7 +1046,13 @@ export const useStore = create<AppState>((set, get) => ({
     }),
 
   sendOsrmRaw: async (url) => {
-    set({ osrmRawState: { status: "loading", result: null, error: null } });
+    set((state) => ({
+      osrmRawState: { status: "loading", result: null, error: null },
+      latestResponseSource: {
+        ...state.latestResponseSource,
+        osrm: "raw",
+      },
+    }));
     try {
       const result = await api.osrmRaw(url);
       set((state) => ({
@@ -1058,7 +1071,13 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   sendValhallaRaw: async (url, body) => {
-    set({ valhallaRawState: { status: "loading", result: null, error: null } });
+    set((state) => ({
+      valhallaRawState: { status: "loading", result: null, error: null },
+      latestResponseSource: {
+        ...state.latestResponseSource,
+        valhalla: "raw",
+      },
+    }));
     try {
       const result = await api.valhallaRaw(url, body);
       set((state) => ({

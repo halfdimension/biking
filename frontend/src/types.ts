@@ -85,6 +85,8 @@ export interface EngineResult {
   normalizedRoutes: NormalizedRoute[];
   /** Full engine response, unmodified (Req 11.1). */
   raw: unknown | null;
+  /** Whether `raw` is literal engine JSON or reconstructed from protobuf. */
+  rawSource?: "engine-json" | "protobuf-derived";
   warnings: RouteWarning[];
   error: EngineError | null;
 }

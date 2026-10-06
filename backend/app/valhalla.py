@@ -214,6 +214,7 @@ def _error_result(
         duration_ms=duration_ms,
         normalized_routes=[],
         raw=raw,
+        raw_source="engine-json",
         warnings=[],
         error=EngineError(
             kind="no_route",
@@ -343,6 +344,7 @@ def normalize_valhalla_response(
             duration_ms=duration_ms,
             normalized_routes=[],
             raw=raw,
+            raw_source="engine-json",
             warnings=[],
             error=EngineError(
                 kind="no_route",
@@ -376,6 +378,7 @@ def normalize_valhalla_response(
         duration_ms=duration_ms,
         normalized_routes=normalized_routes,
         raw=raw,
+        raw_source="engine-json",
         warnings=warnings,
         error=None,
     )

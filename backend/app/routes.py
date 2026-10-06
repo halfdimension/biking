@@ -145,6 +145,7 @@ def _error_envelope(engine: str, result: EngineCallResult) -> EngineResult:
         duration_ms=result.duration_ms,
         normalized_routes=[],
         raw=raw if decoded else None,
+        raw_source="engine-json",
         warnings=[],
         error=result.error,
     )
@@ -164,6 +165,7 @@ def _invalid_response_envelope(engine: str, result: EngineCallResult) -> EngineR
         duration_ms=result.duration_ms,
         normalized_routes=[],
         raw=None,
+        raw_source="engine-json",
         warnings=[],
         error=EngineError(
             kind="invalid_response",
@@ -314,6 +316,7 @@ async def _run_valhalla(
             duration_ms=result.duration_ms,
             normalized_routes=[],
             raw=None,
+            raw_source="protobuf-derived",
             warnings=[],
             error=EngineError(
                 kind="invalid_response",
@@ -355,6 +358,7 @@ def _exception_envelope(engine: str, exc: BaseException) -> EngineResult:
         duration_ms=0.0,
         normalized_routes=[],
         raw=None,
+        raw_source="engine-json",
         warnings=[],
         error=EngineError(
             kind="invalid_response",
