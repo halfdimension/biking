@@ -75,10 +75,12 @@ def normalize(shape: list[tuple[float, float]], edges: list[object]):
 
 
 def test_trace_request_is_fixed_map_snap_with_all_attributes() -> None:
-    body = build_trace_attributes_body("encoded", "motorcycle")
+    body = build_trace_attributes_body("encoded", "bicycle")
 
     assert body["encoded_polyline"] == "encoded"
-    assert body["costing"] == "motorcycle"
+    assert body["costing"] == "bicycle"
+    assert body["costing_options"]["bicycle"]["speed_types"] == ["current"]
+    assert body["date_time"]["type"] == 0
     assert body["shape_match"] == "map_snap"
     assert body["filters"] == {
         "action": "include",
@@ -170,6 +172,10 @@ def test_trace_endpoint_posts_expected_payload(monkeypatch: pytest.MonkeyPatch) 
     assert response.status_code == 200
     assert calls[0][0:2] == ("POST", "http://localhost:8002/trace_attributes")
     assert calls[0][2]["shape_match"] == "map_snap"
+    assert calls[0][2]["costing_options"]["motorcycle"]["speed_types"] == [
+        "current"
+    ]
+    assert calls[0][2]["date_time"]["type"] == 0
     assert response.json()["sourceRouteId"] == "osrm:1"
 
 

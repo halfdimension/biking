@@ -35,6 +35,8 @@ def build_trace_attributes_body(encoded_polyline: str, costing: str) -> dict[str
     return {
         "encoded_polyline": encoded_polyline,
         "costing": costing,
+        "costing_options": {costing: {"speed_types": ["current"]}},
+        "date_time": {"type": 0},
         "shape_match": "map_snap",
         "filters": {"action": "include", "attributes": TRACE_ATTRIBUTES},
     }
