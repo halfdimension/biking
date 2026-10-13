@@ -11,6 +11,7 @@ import {
 import { useStore } from "../store";
 import type { CompareDebug } from "../types";
 import EdgeDetailsPanel from "./EdgeDetailsPanel";
+import JsonViewer from "./JsonViewer";
 import TraceMap from "./TraceMap";
 import TraceRouteAnalysis from "./TraceRouteAnalysis";
 
@@ -40,6 +41,12 @@ export default function TraceInspector() {
     (state) => state.setTraceDetailsExpandedHeight,
   );
   const requestFit = useStore((state) => state.requestTraceFit);
+  const continuityOverlay = useStore(
+    (state) => state.traceContinuityOverlayEnabled,
+  );
+  const toggleContinuityOverlay = useStore(
+    (state) => state.toggleTraceContinuityOverlay,
+  );
   const lowerTab = useStore((state) => state.traceLowerTab);
   const setLowerTab = useStore((state) => state.setTraceLowerTab);
   const detailsCompact =
@@ -94,6 +101,22 @@ export default function TraceInspector() {
         : null,
     [usableResult],
   );
+  const pointCounts = useMemo(() => {
+    const counts = { matched: 0, interpolated: 0, unmatched: 0, flags: 0 };
+    for (const point of usableResult?.matchedPoints ?? []) {
+      counts[point.type] += 1;
+      if (point.beginRouteDiscontinuity || point.endRouteDiscontinuity) {
+        counts.flags += 1;
+      }
+    }
+    return counts;
+  }, [usableResult]);
+  const continuityLabel =
+    usableResult?.continuity.isContinuous === true
+      ? "CONTINUOUS"
+      : usableResult?.continuity.isContinuous === false
+        ? "BROKEN"
+        : "UNKNOWN / UNAVAILABLE";
 
   useEffect(() => {
     if (!sourceRouteId && osrmRoutes[0]) {
@@ -155,6 +178,14 @@ export default function TraceInspector() {
         >
           {status === "loading" ? "Running Valhalla Trace…" : "Run Valhalla Trace"}
         </button>
+        <label className="trace-controls__toggle">
+          <span>Continuity overlay</span>
+          <input
+            type="checkbox"
+            checked={continuityOverlay}
+            onChange={toggleContinuityOverlay}
+          />
+        </label>
       </section>
 
       {osrmRoutes.length === 0 ? (
@@ -178,6 +209,25 @@ export default function TraceInspector() {
               {usableResult.exactGeometryMatch ? "Yes" : "No"}
             </strong>
           </div>
+          <div><span>Matched</span><strong>{pointCounts.matched}</strong></div>
+          <div><span>Interpolated</span><strong>{pointCounts.interpolated}</strong></div>
+          <div><span>Unmatched</span><strong>{pointCounts.unmatched}</strong></div>
+          <div><span>Point discontinuity flags</span><strong>{pointCounts.flags}</strong></div>
+          <div><span>Trace route components</span><strong>{usableResult.continuity.componentCount}</strong></div>
+          <div><span>Trace route breaks</span><strong>{usableResult.continuity.breakCount}</strong></div>
+          <div>
+            <span>Routable continuity</span>
+            <strong className={
+              usableResult.continuity.isContinuous === true
+                ? "trace-summary__yes"
+                : usableResult.continuity.isContinuous === false
+                  ? "trace-summary__broken"
+                  : "trace-summary__unknown"
+            }>
+              {continuityLabel}
+            </strong>
+          </div>
+
           {usableResult.warnings.map((warning, index) => (
             <p className="trace-summary__warning" role="status" key={`${warning.kind}:${index}`}>
               {warning.message}
@@ -189,6 +239,22 @@ export default function TraceInspector() {
             </p>
           ))}
         </section>
+      ) : null}
+
+      {usableResult &&
+      (usableResult.rawTraceAttributes != null ||
+        usableResult.rawTraceRoute != null) ? (
+        <details className="trace-raw-responses">
+          <summary>Raw Trace Responses</summary>
+          <details>
+            <summary>trace_attributes</summary>
+            <JsonViewer value={usableResult.rawTraceAttributes} />
+          </details>
+          <details>
+            <summary>trace_route</summary>
+            <JsonViewer value={usableResult.rawTraceRoute} />
+          </details>
+        </details>
       ) : null}
 
       <div

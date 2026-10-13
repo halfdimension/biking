@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useStore } from "../store";
-import type { CompareDebug, NormalizedRoute } from "../types";
+import type { CompareDebug, NormalizedRoute, TraceMatchedPoint } from "../types";
 import {
   attachDashboardMapLifecycle,
   dashboardMapOptions,
@@ -24,6 +24,10 @@ import {
   analysisFocusLayerSpec,
 } from "../map/layers";
 import {
+  buildTraceContinuityFeatureCollection,
+  buildTraceMatchedPointsFeatureCollection,
+} from "../map/traceDiagnostics";
+import {
   resolveDebugSegmentIds,
   type RenderedDebugFeature,
 } from "../map/debugHitTest";
@@ -31,6 +35,14 @@ import EdgeDebugInspector from "./EdgeDebugInspector";
 
 const TRACE_ROUTES_SOURCE = "trace-inspector-routes";
 const TRACE_DEBUG_SOURCE = "trace-inspector-debug";
+export const TRACE_MATCHED_POINTS_SOURCE = "trace-matched-points";
+export const TRACE_MATCHED_POINTS_LAYER = "trace-matched-points-circle";
+export const TRACE_MATCHED_POINTS_RING_LAYER = "trace-matched-points-ring";
+export const TRACE_CONTINUITY_SOURCE = "trace-continuity";
+export const TRACE_CONTINUITY_COMPONENT_LAYER = "trace-continuity-components";
+export const TRACE_CONTINUITY_CONNECTOR_LAYER = "trace-continuity-connectors";
+export const TRACE_CONTINUITY_ENDPOINT_LAYER = "trace-continuity-endpoints";
+const TRACE_COMPONENT_COLORS = ["#0f766e", "#7c3aed", "#db2777", "#0891b2"];
 export const TRACE_ANALYSIS_MATCHES_SOURCE = "trace-analysis-matches";
 export const TRACE_ANALYSIS_FOCUS_SOURCE = "trace-analysis-focus";
 export const TRACE_ANALYSIS_MATCHES_GLOW_LAYER = "trace-analysis-matches-glow";
@@ -100,6 +112,21 @@ export default function TraceMap({
   const fitRequestId = useStore((state) => state.traceFitRequestId);
   const setHovered = useStore((state) => state.setTraceHoveredSegmentIds);
   const pinHovered = useStore((state) => state.pinTraceHoveredSegments);
+  const hoveredMatchedPointIndex = useStore(
+    (state) => state.traceHoveredMatchedPointIndex,
+  );
+  const pinnedMatchedPointIndex = useStore(
+    (state) => state.tracePinnedMatchedPointIndex,
+  );
+  const continuityOverlay = useStore(
+    (state) => state.traceContinuityOverlayEnabled,
+  );
+  const setHoveredMatchedPoint = useStore(
+    (state) => state.setTraceHoveredMatchedPoint,
+  );
+  const pinMatchedPoint = useStore((state) => state.pinTraceMatchedPoint);
+  const clearMatchedPoint = useStore((state) => state.clearTraceMatchedPoint);
+
   const traceResultRevision = useStore((state) => state.traceResultRevision);
   const traceAnalysisExecutedSearch = useStore(
     (state) => state.traceAnalysisExecutedSearch,
@@ -122,6 +149,18 @@ export default function TraceMap({
   const traceRouteId = sourceRoute ? `trace:${sourceRoute.id}` : "trace:none";
   const usableResult =
     result && result.sourceRouteId === sourceRoute?.id ? result : null;
+  const activeMatchedPoint = useMemo<TraceMatchedPoint | null>(() => {
+    const index = pinnedMatchedPointIndex ?? hoveredMatchedPointIndex;
+    if (index == null) return null;
+    return (
+      usableResult?.matchedPoints.find((point) => point.index === index) ?? null
+    );
+  }, [
+    hoveredMatchedPointIndex,
+    pinnedMatchedPointIndex,
+    usableResult,
+  ]);
+
   const visibility = useMemo(() => ({ [traceRouteId]: true }), [traceRouteId]);
   const routeLabels = useMemo(
     () => ({
@@ -198,6 +237,29 @@ export default function TraceMap({
       const point: [number, number] = [event.lngLat.lng, event.lngLat.lat];
       hoverFrame = requestAnimationFrame(() => {
         hoverFrame = null;
+        let pointFeatures: maplibregl.MapGeoJSONFeature[] = [];
+        try {
+          pointFeatures = map.queryRenderedFeatures(
+            [[x - 6, y - 6], [x + 6, y + 6]],
+            { layers: [TRACE_MATCHED_POINTS_LAYER] },
+          );
+        } catch {
+          // Matched-point layers are created lazily with trace diagnostics.
+        }
+        const matchedIndex = Number(pointFeatures[0]?.properties?.index);
+        const matchedPoint = Number.isInteger(matchedIndex)
+          ? useStore
+              .getState()
+              .traceResult?.matchedPoints.find(
+                (candidate) => candidate.index === matchedIndex,
+              ) ?? null
+          : null;
+        setHoveredMatchedPoint(matchedPoint);
+        if (matchedPoint) {
+          setHovered([], null);
+          return;
+        }
+
         let features: maplibregl.MapGeoJSONFeature[] = [];
         try {
           features = map.queryRenderedFeatures(
@@ -218,9 +280,22 @@ export default function TraceMap({
         );
       });
     };
-    const onLeave = () => setHovered([], null);
+    const onLeave = () => {
+      setHoveredMatchedPoint(null);
+      setHovered([], null);
+    };
     const onClick = () => {
-      if (useStore.getState().traceHoveredSegmentIds.length) pinHovered();
+      const state = useStore.getState();
+      const matchedIndex = state.traceHoveredMatchedPointIndex;
+      if (matchedIndex != null) {
+        const matchedPoint =
+          state.traceResult?.matchedPoints.find(
+            (candidate) => candidate.index === matchedIndex,
+          ) ?? null;
+        pinMatchedPoint(matchedPoint);
+        return;
+      }
+      if (state.traceHoveredSegmentIds.length) pinHovered();
     };
 
     map.on("mousemove", onMove);
@@ -242,7 +317,12 @@ export default function TraceMap({
         delete (window as unknown as { __traceMap?: unknown }).__traceMap;
       }
     };
-  }, [pinHovered, setHovered]);
+  }, [
+    pinHovered,
+    pinMatchedPoint,
+    setHovered,
+    setHoveredMatchedPoint,
+  ]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -611,6 +691,174 @@ export default function TraceMap({
       map.off?.("idle", apply);
     };
   }, [debug, visibility]);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const data = buildTraceMatchedPointsFeatureCollection(
+      usableResult?.matchedPoints ?? [],
+    );
+
+    const apply = () => {
+      const styleWasReady = Boolean(map.isStyleLoaded?.());
+      const existing = map.getSource(TRACE_MATCHED_POINTS_SOURCE) as
+        | maplibregl.GeoJSONSource
+        | undefined;
+      if (existing) {
+        existing.setData(data as unknown as GeoJSON.FeatureCollection);
+      } else {
+        if (!styleWasReady) {
+          map.once?.("idle", apply);
+          return;
+        }
+        map.addSource(TRACE_MATCHED_POINTS_SOURCE, {
+          type: "geojson",
+          data: data as unknown as GeoJSON.FeatureCollection,
+        });
+      }
+      if (!styleWasReady) {
+        map.once?.("idle", apply);
+        return;
+      }
+      if (!map.getLayer(TRACE_MATCHED_POINTS_RING_LAYER)) {
+        map.addLayer({
+          id: TRACE_MATCHED_POINTS_RING_LAYER,
+          type: "circle",
+          source: TRACE_MATCHED_POINTS_SOURCE,
+          filter: ["==", ["get", "hasPointDiscontinuity"], true],
+          paint: {
+            "circle-color": "#f59e0b",
+            "circle-radius": ["interpolate", ["linear"], ["zoom"], 5, 6, 16, 11],
+            "circle-opacity": 0.95,
+          },
+        } as maplibregl.LayerSpecification);
+      }
+      if (!map.getLayer(TRACE_MATCHED_POINTS_LAYER)) {
+        map.addLayer({
+          id: TRACE_MATCHED_POINTS_LAYER,
+          type: "circle",
+          source: TRACE_MATCHED_POINTS_SOURCE,
+          paint: {
+            "circle-color": ["get", "color"],
+            "circle-radius": ["interpolate", ["linear"], ["zoom"], 5, 3, 16, 7],
+            "circle-stroke-color": "#ffffff",
+            "circle-stroke-width": 1,
+            "circle-opacity": 0.96,
+          },
+        } as maplibregl.LayerSpecification);
+      }
+    };
+
+    map.on("style.load", apply);
+    if (map.getSource(TRACE_MATCHED_POINTS_SOURCE) || map.isStyleLoaded?.()) {
+      apply();
+    } else {
+      map.once?.("idle", apply);
+    }
+    return () => {
+      map.off("style.load", apply);
+      map.off?.("idle", apply);
+    };
+  }, [usableResult?.matchedPoints]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const data = buildTraceContinuityFeatureCollection(
+      continuityOverlay ? (usableResult?.traceRouteComponents ?? []) : [],
+      continuityOverlay ? (usableResult?.continuity.breaks ?? []) : [],
+    );
+
+    const apply = () => {
+      const styleWasReady = Boolean(map.isStyleLoaded?.());
+      const existing = map.getSource(TRACE_CONTINUITY_SOURCE) as
+        | maplibregl.GeoJSONSource
+        | undefined;
+      if (existing) {
+        existing.setData(data as unknown as GeoJSON.FeatureCollection);
+      } else {
+        if (!styleWasReady) {
+          map.once?.("idle", apply);
+          return;
+        }
+        map.addSource(TRACE_CONTINUITY_SOURCE, {
+          type: "geojson",
+          data: data as unknown as GeoJSON.FeatureCollection,
+        });
+      }
+      if (!styleWasReady) {
+        map.once?.("idle", apply);
+        return;
+      }
+      const beforeMatched = map.getLayer(TRACE_MATCHED_POINTS_RING_LAYER)
+        ? TRACE_MATCHED_POINTS_RING_LAYER
+        : undefined;
+      if (!map.getLayer(TRACE_CONTINUITY_COMPONENT_LAYER)) {
+        map.addLayer({
+          id: TRACE_CONTINUITY_COMPONENT_LAYER,
+          type: "line",
+          source: TRACE_CONTINUITY_SOURCE,
+          filter: ["==", ["get", "kind"], "component"],
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            "line-color": [
+              "match",
+              ["%", ["get", "componentIndex"], TRACE_COMPONENT_COLORS.length],
+              0, TRACE_COMPONENT_COLORS[0],
+              1, TRACE_COMPONENT_COLORS[1],
+              2, TRACE_COMPONENT_COLORS[2],
+              TRACE_COMPONENT_COLORS[3],
+            ],
+            "line-width": 6,
+            "line-opacity": 0.88,
+          },
+        } as maplibregl.LayerSpecification, beforeMatched);
+      }
+      if (!map.getLayer(TRACE_CONTINUITY_CONNECTOR_LAYER)) {
+        map.addLayer({
+          id: TRACE_CONTINUITY_CONNECTOR_LAYER,
+          type: "line",
+          source: TRACE_CONTINUITY_SOURCE,
+          filter: ["==", ["get", "kind"], "break-connector"],
+          layout: { "line-cap": "round" },
+          paint: {
+            "line-color": "#b45309",
+            "line-width": 3,
+            "line-dasharray": [1.5, 1.5],
+            "line-opacity": 0.9,
+          },
+        } as maplibregl.LayerSpecification, beforeMatched);
+      }
+      if (!map.getLayer(TRACE_CONTINUITY_ENDPOINT_LAYER)) {
+        map.addLayer({
+          id: TRACE_CONTINUITY_ENDPOINT_LAYER,
+          type: "circle",
+          source: TRACE_CONTINUITY_SOURCE,
+          filter: ["==", ["get", "kind"], "break-end"],
+          paint: {
+            "circle-color": "#f59e0b",
+            "circle-radius": 7,
+            "circle-stroke-color": "#7c2d12",
+            "circle-stroke-width": 2,
+          },
+        } as maplibregl.LayerSpecification, beforeMatched);
+      }
+    };
+
+    map.on("style.load", apply);
+    if (map.getSource(TRACE_CONTINUITY_SOURCE) || map.isStyleLoaded?.()) {
+      apply();
+    } else {
+      map.once?.("idle", apply);
+    }
+    return () => {
+      map.off("style.load", apply);
+      map.off?.("idle", apply);
+    };
+  }, [
+    continuityOverlay,
+    usableResult?.continuity.breaks,
+    usableResult?.traceRouteComponents,
+  ]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -676,7 +924,43 @@ export default function TraceMap({
       <div className="trace-map__legend" aria-label="Trace map legend">
         <span><i className="trace-map__swatch trace-map__swatch--original" />Original OSRM</span>
         <span><i className="trace-map__swatch trace-map__swatch--snapped" />Valhalla map-match</span>
+        <span><i className="trace-map__dot trace-map__dot--matched" />Matched</span>
+        <span><i className="trace-map__dot trace-map__dot--interpolated" />Interpolated</span>
+        <span><i className="trace-map__dot trace-map__dot--unmatched" />Unmatched</span>
+        <span><i className="trace-map__ring" />Point discontinuity</span>
+        {continuityOverlay ? (
+          <>
+            <span><i className="trace-map__swatch trace-map__swatch--component" />Trace-route components</span>
+            <span><i className="trace-map__dot trace-map__dot--break" />Break endpoints</span>
+            <span><i className="trace-map__swatch trace-map__swatch--gap" />Break gap — diagnostic, not routed</span>
+          </>
+        ) : null}
       </div>
+      {activeMatchedPoint ? (
+        <aside className="trace-point-card" aria-label="Matched point details">
+          <header>
+            <strong>MATCHED POINT</strong>
+            {pinnedMatchedPointIndex != null ? (
+              <button
+                type="button"
+                aria-label="Close matched point details"
+                onClick={clearMatchedPoint}
+              >
+                ×
+              </button>
+            ) : null}
+          </header>
+          <dl>
+            <div><dt>Type</dt><dd>{activeMatchedPoint.type}</dd></div>
+            <div><dt>Point index</dt><dd>{activeMatchedPoint.index}</dd></div>
+            <div><dt>Edge index</dt><dd>{activeMatchedPoint.edgeIndex ?? "Unavailable"}</dd></div>
+            <div><dt>Distance along edge</dt><dd>{activeMatchedPoint.distanceAlongEdge ?? "Unavailable"}</dd></div>
+            <div><dt>Distance from trace point</dt><dd>{activeMatchedPoint.distanceFromTracePoint ?? "Unavailable"}</dd></div>
+            <div><dt>Begin route discontinuity</dt><dd>{activeMatchedPoint.beginRouteDiscontinuity ? "Yes" : "No"}</dd></div>
+            <div><dt>End route discontinuity</dt><dd>{activeMatchedPoint.endRouteDiscontinuity ? "Yes" : "No"}</dd></div>
+          </dl>
+        </aside>
+      ) : null}
       <button
         type="button"
         className={"map-tilt" + (tilted ? " map-tilt--active" : "")}

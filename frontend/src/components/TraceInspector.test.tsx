@@ -89,6 +89,9 @@ function traceResult(sourceRouteId = "osrm:0"): ValhallaTraceResult {
     tracePointCount: 3,
     geometryDeviation: null,
     segments: [],
+    matchedPoints: [],
+    traceRouteComponents: [],
+    continuity: { isContinuous: null, componentCount: 0, breakCount: 0, breaks: [] },
     warnings: [{
       kind: "geometry_changed",
       message: "Valhalla map_snap changed the source geometry.",
@@ -197,4 +200,83 @@ describe("TraceInspector", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Valhalla is unavailable.");
     expect(useStore.getState().results).toBe(before);
   });
+
+  it("shows point counts separately from an authoritative broken trace route", () => {
+    const diagnosticResult: ValhallaTraceResult = {
+      ...traceResult(),
+      matchedPoints: [
+        {
+          index: 0,
+          lon: 77,
+          lat: 28,
+          type: "matched",
+          edgeIndex: 0,
+          distanceAlongEdge: 0,
+          distanceFromTracePoint: 0,
+          beginRouteDiscontinuity: false,
+          endRouteDiscontinuity: false,
+        },
+        {
+          index: 1,
+          lon: 77.1,
+          lat: 28.1,
+          type: "interpolated",
+          edgeIndex: 1,
+          distanceAlongEdge: null,
+          distanceFromTracePoint: null,
+          beginRouteDiscontinuity: false,
+          endRouteDiscontinuity: false,
+        },
+        {
+          index: 2,
+          lon: 77.2,
+          lat: 28.2,
+          type: "unmatched",
+          edgeIndex: null,
+          distanceAlongEdge: null,
+          distanceFromTracePoint: 5,
+          beginRouteDiscontinuity: false,
+          endRouteDiscontinuity: false,
+        },
+      ],
+      traceRouteComponents: [
+        { index: 0, label: "Trace Route Component 1", geometry: [[77, 28], [77.1, 28.1]], legs: [] },
+        { index: 1, label: "Trace Route Component 2", geometry: [[77.2, 28.2], [77.3, 28.3]], legs: [] },
+      ],
+      continuity: {
+        isContinuous: false,
+        componentCount: 2,
+        breakCount: 1,
+        breaks: [{
+          index: 0,
+          previousComponentIndex: 0,
+          nextComponentIndex: 1,
+          previousEndCoordinate: [77.1, 28.1],
+          nextStartCoordinate: [77.2, 28.2],
+          gapMeters: 100,
+        }],
+      },
+    };
+    act(() => useStore.setState({
+      results: comparison(),
+      traceSourceRouteId: "osrm:0",
+      traceResult: diagnosticResult,
+    }));
+
+    render(<TraceInspector />);
+
+    const summary = screen.getByRole("region", { name: "Trace summary" });
+    expect(within(summary).getByText("Point discontinuity flags").parentElement).toHaveTextContent("0");
+    expect(within(summary).getByText("Trace route breaks").parentElement).toHaveTextContent("1");
+    expect(within(summary).getByText("Routable continuity").parentElement).toHaveTextContent("BROKEN");
+    expect(within(summary).getByText("Matched").parentElement).toHaveTextContent("1");
+    expect(within(summary).getByText("Interpolated").parentElement).toHaveTextContent("1");
+    expect(within(summary).getByText("Unmatched").parentElement).toHaveTextContent("1");
+    expect(screen.queryByText(/Valhalla Primary|Valhalla Alt/)).not.toBeInTheDocument();
+
+    const toggle = screen.getByRole("checkbox", { name: "Continuity overlay" });
+    fireEvent.click(toggle);
+    expect(useStore.getState().traceContinuityOverlayEnabled).toBe(true);
+  });
+
 });

@@ -33,6 +33,7 @@ from app.models import (
     Coordinate,
     CurlImportRequest,
     CurlImportResponse,
+    DebugError,
     EngineError,
     EngineDebugResult,
     EngineResult,
@@ -59,7 +60,9 @@ from app.valhalla_pbf import (
 )
 from app.trace import (
     build_trace_attributes_body,
+    build_trace_route_body,
     normalize_trace_attributes_response,
+    normalize_trace_route_response,
     trace_error_response,
 )
 
@@ -108,38 +111,136 @@ def _decode_json(result: EngineCallResult) -> tuple[Any, bool]:
 
 @router.post("/trace/valhalla", response_model=ValhallaTraceResponse)
 async def trace_valhalla(request: ValhallaTraceRequest) -> ValhallaTraceResponse:
-    """Map-match one preserved OSRM polyline through Valhalla trace_attributes."""
-    url = f"{config.VALHALLA_BASE_URL}/trace_attributes"
-    payload = build_trace_attributes_body(request.encoded_polyline, request.costing)
-    result = await call_engine("POST", url, json=payload)
-    if not result.ok:
-        error = result.error
-        return trace_error_response(
-            route_id=request.route_id,
-            encoded_polyline=request.encoded_polyline,
-            kind=error.kind if error else "trace_failed",
-            message=error.message if error else "Valhalla trace request failed.",
-            detail=error.detail if error else None,
-            http_status=result.http_status,
-            duration_ms=result.duration_ms,
-        )
-    body, decoded = _decode_json(result)
-    if not decoded:
-        return trace_error_response(
-            route_id=request.route_id,
-            encoded_polyline=request.encoded_polyline,
-            kind="invalid_response",
-            message="Valhalla returned a non-JSON trace response.",
-            http_status=result.http_status,
-            duration_ms=result.duration_ms,
-        )
-    return normalize_trace_attributes_response(
-        body,
-        route_id=request.route_id,
-        encoded_polyline=request.encoded_polyline,
-        duration_ms=result.duration_ms,
-        http_status=result.http_status,
+    """Run both local Valhalla trace diagnostics for one preserved polyline."""
+    encoded_polyline = request.encoded_polyline
+    attributes_url = f"{config.VALHALLA_BASE_URL}/trace_attributes"
+    route_url = f"{config.VALHALLA_BASE_URL}/trace_route"
+    attributes_payload = build_trace_attributes_body(
+        encoded_polyline, request.costing
     )
+    route_payload = build_trace_route_body(encoded_polyline, request.costing)
+    attributes_outcome, route_outcome = await asyncio.gather(
+        call_engine("POST", attributes_url, json=attributes_payload),
+        call_engine("POST", route_url, json=route_payload),
+        return_exceptions=True,
+    )
+
+    if isinstance(attributes_outcome, BaseException):
+        attributes = trace_error_response(
+            route_id=request.route_id,
+            encoded_polyline=encoded_polyline,
+            kind="trace_attributes_exception",
+            message="Valhalla trace_attributes failed unexpectedly.",
+            detail=str(attributes_outcome),
+        )
+    elif not attributes_outcome.ok:
+        error = attributes_outcome.error
+        attributes = trace_error_response(
+            route_id=request.route_id,
+            encoded_polyline=encoded_polyline,
+            kind=f"trace_attributes_{error.kind if error else 'failed'}",
+            message=(
+                f"trace_attributes: {error.message}"
+                if error
+                else "Valhalla trace_attributes request failed."
+            ),
+            detail=error.detail if error else None,
+            http_status=attributes_outcome.http_status,
+            duration_ms=attributes_outcome.duration_ms,
+        )
+    else:
+        attributes_body, decoded = _decode_json(attributes_outcome)
+        if not decoded:
+            attributes = trace_error_response(
+                route_id=request.route_id,
+                encoded_polyline=encoded_polyline,
+                kind="trace_attributes_invalid_response",
+                message="Valhalla trace_attributes returned a non-JSON response.",
+                http_status=attributes_outcome.http_status,
+                duration_ms=attributes_outcome.duration_ms,
+            )
+        else:
+            try:
+                attributes = normalize_trace_attributes_response(
+                    attributes_body,
+                    route_id=request.route_id,
+                    encoded_polyline=encoded_polyline,
+                    duration_ms=attributes_outcome.duration_ms,
+                    http_status=attributes_outcome.http_status,
+                )
+            except Exception as exc:
+                attributes = trace_error_response(
+                    route_id=request.route_id,
+                    encoded_polyline=encoded_polyline,
+                    kind="trace_attributes_normalization",
+                    message="Valhalla trace_attributes could not be normalized.",
+                    detail=str(exc),
+                    http_status=attributes_outcome.http_status,
+                    duration_ms=attributes_outcome.duration_ms,
+                )
+
+    route_errors: list[DebugError] = []
+    route_body: Any = None
+    components = []
+    continuity = attributes.continuity
+    if isinstance(route_outcome, BaseException):
+        route_errors.append(
+            DebugError(
+                kind="trace_route_exception",
+                message="Valhalla trace_route failed unexpectedly.",
+                detail=str(route_outcome),
+            )
+        )
+    elif not route_outcome.ok:
+        error = route_outcome.error
+        route_errors.append(
+            DebugError(
+                kind=f"trace_route_{error.kind if error else 'failed'}",
+                message=(
+                    f"trace_route: {error.message}"
+                    if error
+                    else "Valhalla trace_route request failed."
+                ),
+                detail=error.detail if error else None,
+            )
+        )
+    else:
+        route_body, decoded = _decode_json(route_outcome)
+        if not decoded:
+            route_errors.append(
+                DebugError(
+                    kind="trace_route_invalid_response",
+                    message="Valhalla trace_route returned a non-JSON response.",
+                )
+            )
+        else:
+            try:
+                components, continuity, normalization_errors = (
+                    normalize_trace_route_response(route_body)
+                )
+                route_errors.extend(normalization_errors)
+            except Exception as exc:
+                route_errors.append(
+                    DebugError(
+                        kind="trace_route_normalization",
+                        message="Valhalla trace_route could not be normalized.",
+                        detail=str(exc),
+                    )
+                )
+
+    attributes.trace_route_components = components
+    attributes.continuity = continuity
+    attributes.raw_trace_route = route_body
+    attributes.errors.extend(route_errors)
+    attributes_usable = attributes.status != "error"
+    route_usable = continuity.is_continuous is not None
+    if attributes_usable and route_usable and not attributes.errors:
+        attributes.status = "ok"
+    elif attributes_usable or route_usable:
+        attributes.status = "partial"
+    else:
+        attributes.status = "error"
+    return attributes
 
 
 def _error_envelope(engine: str, result: EngineCallResult) -> EngineResult:

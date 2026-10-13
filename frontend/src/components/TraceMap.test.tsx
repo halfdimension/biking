@@ -64,7 +64,10 @@ class MockMap {
   getBearing = vi.fn(() => this.camera.bearing);
   getPitch = vi.fn(() => this.camera.pitch);
   setFeatureState = vi.fn();
-  queryRenderedFeatures = vi.fn(() => []);
+  queryRenderedFeatures = vi.fn(
+    (_geometry?: unknown, _options?: { layers?: string[] }) =>
+      [] as Array<{ properties?: Record<string, unknown> }>,
+  );
   getCanvas = vi.fn(() => ({ width: 900, height: 500 }));
   getContainer = vi.fn(() => this.config.container);
 
@@ -192,6 +195,9 @@ function traceResult(
     tracePointCount: traceGeometry.length,
     geometryDeviation: null,
     segments,
+    matchedPoints: [],
+    traceRouteComponents: [],
+    continuity: { isContinuous: null, componentCount: 0, breakCount: 0, breaks: [] },
     warnings: [],
     errors: [],
     httpStatus: 200,
@@ -213,6 +219,9 @@ function resetStore(result: ValhallaTraceResult | null = null) {
     comparisonResultRevision: 0,
     traceAnalysisExecutedSearch: null,
     traceAnalysisFocusedSegmentId: null,
+    traceHoveredMatchedPointIndex: null,
+    tracePinnedMatchedPointIndex: null,
+    traceContinuityOverlayEnabled: false,
   });
 }
 
@@ -599,4 +608,104 @@ describe("TraceMap analysis overlays", () => {
     expect(map.sources.get("trace-inspector-routes")).toBe(routeSource);
     expect(map.sources.get("trace-inspector-debug")).toBe(debugSource);
   });
+
+  it("updates diagnostic sources without recreating the map and gives point hits click precedence", () => {
+    const trace = {
+      ...traceResult([[77, 28], [77.1, 28.1]], [analysisSegment()]),
+      matchedPoints: [{
+        index: 7,
+        lon: 77.05,
+        lat: 28.05,
+        type: "interpolated" as const,
+        edgeIndex: null,
+        distanceAlongEdge: null,
+        distanceFromTracePoint: 4,
+        beginRouteDiscontinuity: true,
+        endRouteDiscontinuity: false,
+      }],
+      traceRouteComponents: [
+        {
+          index: 0,
+          label: "Trace Route Component 1",
+          geometry: [[77, 28], [77.04, 28.04]] as [number, number][],
+          legs: [],
+        },
+        {
+          index: 1,
+          label: "Trace Route Component 2",
+          geometry: [[77.06, 28.06], [77.1, 28.1]] as [number, number][],
+          legs: [],
+        },
+      ],
+      continuity: {
+        isContinuous: false,
+        componentCount: 2,
+        breakCount: 1,
+        breaks: [{
+          index: 0,
+          previousComponentIndex: 0,
+          nextComponentIndex: 1,
+          previousEndCoordinate: [77.04, 28.04] as [number, number],
+          nextStartCoordinate: [77.06, 28.06] as [number, number],
+          gapMeters: 100,
+        }],
+      },
+    };
+    resetStore(trace);
+    const view = render(<TraceMap sourceRoute={sourceRoute()} />);
+    const map = instances[0];
+
+    expect(
+      (map.sources.get("trace-matched-points")!.data as { features: unknown[] })
+        .features,
+    ).toHaveLength(1);
+    expect(
+      (map.sources.get("trace-continuity")!.data as { features: unknown[] })
+        .features,
+    ).toEqual([]);
+
+    act(() => useStore.getState().toggleTraceContinuityOverlay());
+    expect(instances).toHaveLength(1);
+    expect(
+      (map.sources.get("trace-continuity")!.data as {
+        features: Array<{ properties: { kind: string } }>;
+      }).features.map((feature) => feature.properties.kind),
+    ).toEqual([
+      "component",
+      "component",
+      "break-end",
+      "break-end",
+      "break-connector",
+    ]);
+
+    map.queryRenderedFeatures.mockImplementation((_geometry, options) =>
+      options?.layers?.includes("trace-matched-points-circle")
+        ? [{ properties: { index: 7 } }]
+        : [{ properties: { debugSegmentId: analysisSegment().id } }],
+    );
+    const requestAnimationFrame = window.requestAnimationFrame;
+    window.requestAnimationFrame = (callback) => {
+      callback(0);
+      return 1;
+    };
+    act(() => map.emit("mousemove", {
+      point: { x: 20, y: 20 },
+      lngLat: { lng: 77.05, lat: 28.05 },
+    }));
+    window.requestAnimationFrame = requestAnimationFrame;
+
+    expect(useStore.getState().traceHoveredMatchedPointIndex).toBe(7);
+    expect(useStore.getState().traceHoveredSegmentIds).toEqual([]);
+    expect(screen.getByRole("complementary", { name: "Matched point details" }))
+      .toHaveTextContent("interpolated");
+    expect(screen.getByText("Edge index").parentElement)
+      .toHaveTextContent("Unavailable");
+
+    act(() => map.emit("click"));
+    expect(useStore.getState().tracePinnedMatchedPointIndex).toBe(7);
+    expect(useStore.getState().tracePinnedSegmentIds).toEqual([]);
+
+    view.unmount();
+  });
+
 });

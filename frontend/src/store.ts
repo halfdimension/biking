@@ -29,6 +29,7 @@ import type {
   EngineResult,
   NormalizedRoute,
   RouteQuality,
+  TraceMatchedPoint,
   TestCase,
   ValhallaTraceResult,
   RoutingTarget,
@@ -142,6 +143,9 @@ export interface AppState {
   tracePinnedSegmentIds: string[];
   tracePinnedPoint: [number, number] | null;
   traceInspectorPinned: boolean;
+  traceHoveredMatchedPointIndex: number | null;
+  tracePinnedMatchedPointIndex: number | null;
+  traceContinuityOverlayEnabled: boolean;
   traceDetailsCollapsed: boolean;
   traceDetailsExpandedHeight: number;
   traceFitRequestId: number;
@@ -293,6 +297,10 @@ export interface AppState {
     point?: [number, number] | null,
   ) => void;
   clearTracePin: () => void;
+  setTraceHoveredMatchedPoint: (point: TraceMatchedPoint | null) => void;
+  pinTraceMatchedPoint: (point: TraceMatchedPoint | null) => void;
+  clearTraceMatchedPoint: () => void;
+  toggleTraceContinuityOverlay: () => void;
   toggleTraceDetailsCollapsed: () => void;
   setTraceDetailsExpandedHeight: (height: number) => void;
   setTraceLowerTab: (tab: TraceLowerTab) => void;
@@ -644,6 +652,9 @@ export const useStore = create<AppState>((set, get) => ({
   tracePinnedSegmentIds: [],
   tracePinnedPoint: null,
   traceInspectorPinned: false,
+  traceHoveredMatchedPointIndex: null,
+  tracePinnedMatchedPointIndex: null,
+  traceContinuityOverlayEnabled: false,
   traceDetailsCollapsed: false,
   traceDetailsExpandedHeight: 180,
   traceFitRequestId: 0,
@@ -800,6 +811,8 @@ export const useStore = create<AppState>((set, get) => ({
               tracePinnedSegmentIds: [],
               tracePinnedPoint: null,
               traceInspectorPinned: false,
+              traceHoveredMatchedPointIndex: null,
+              tracePinnedMatchedPointIndex: null,
               traceAnalysisExecutedSearch: null,
               traceAnalysisFocusedSegmentId: null,
               traceResultRevision: previous.traceResultRevision + 1,
@@ -890,6 +903,8 @@ export const useStore = create<AppState>((set, get) => ({
       tracePinnedSegmentIds: [],
       tracePinnedPoint: null,
       traceInspectorPinned: false,
+      traceHoveredMatchedPointIndex: null,
+      tracePinnedMatchedPointIndex: null,
       traceAnalysisExecutedSearch: null,
       traceAnalysisFocusedSegmentId: null,
       traceResultRevision: previous.traceResultRevision + 1,
@@ -922,6 +937,8 @@ export const useStore = create<AppState>((set, get) => ({
       tracePinnedSegmentIds: [],
       tracePinnedPoint: null,
       traceInspectorPinned: false,
+      traceHoveredMatchedPointIndex: null,
+      tracePinnedMatchedPointIndex: null,
       traceAnalysisExecutedSearch: null,
       traceAnalysisFocusedSegmentId: null,
     });
@@ -996,6 +1013,23 @@ export const useStore = create<AppState>((set, get) => ({
       tracePinnedPoint: null,
       traceInspectorPinned: false,
     }),
+
+  setTraceHoveredMatchedPoint: (point) =>
+    set({ traceHoveredMatchedPointIndex: point?.index ?? null }),
+
+  pinTraceMatchedPoint: (point) =>
+    set({
+      tracePinnedMatchedPointIndex: point?.index ?? null,
+      traceHoveredMatchedPointIndex: point?.index ?? null,
+    }),
+
+  clearTraceMatchedPoint: () =>
+    set({ tracePinnedMatchedPointIndex: null }),
+
+  toggleTraceContinuityOverlay: () =>
+    set((state) => ({
+      traceContinuityOverlayEnabled: !state.traceContinuityOverlayEnabled,
+    })),
 
   toggleTraceDetailsCollapsed: () =>
     set((state) => ({

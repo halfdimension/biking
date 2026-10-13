@@ -77,7 +77,7 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
   return (await res.json()) as T;
 }
 
-/** Map-match a preserved OSRM polyline through Valhalla trace_attributes. */
+/** Run local Valhalla trace diagnostics for one preserved OSRM polyline. */
 export function valhallaTrace(
   routeId: string,
   encodedPolyline: string,

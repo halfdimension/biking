@@ -190,6 +190,47 @@ export interface EngineDebugResult<
   segments: TSegment[];
   errors: DebugError[];
 }
+export type TraceMatchedPointType = "matched" | "interpolated" | "unmatched";
+
+export interface TraceMatchedPoint {
+  index: number;
+  lon: number;
+  lat: number;
+  type: TraceMatchedPointType;
+  edgeIndex: number | null;
+  distanceAlongEdge: number | null;
+  distanceFromTracePoint: number | null;
+  beginRouteDiscontinuity: boolean;
+  endRouteDiscontinuity: boolean;
+}
+
+export interface TraceRouteLeg {
+  legIndex: number;
+  geometry: [number, number][];
+}
+
+export interface TraceRouteComponent {
+  index: number;
+  label: string;
+  geometry: [number, number][];
+  legs: TraceRouteLeg[];
+}
+
+export interface TraceRouteBreak {
+  index: number;
+  previousComponentIndex: number;
+  nextComponentIndex: number;
+  previousEndCoordinate: [number, number];
+  nextStartCoordinate: [number, number];
+  gapMeters: number;
+}
+
+export interface TraceContinuitySummary {
+  isContinuous: boolean | null;
+  componentCount: number;
+  breakCount: number;
+  breaks: TraceRouteBreak[];
+}
 
 export interface CompareDebug {
   osrm: EngineDebugResult;
@@ -223,6 +264,11 @@ export interface ValhallaTraceResult {
   tracePointCount: number;
   geometryDeviation: unknown | null;
   segments: ValhallaDebugSegment[];
+  matchedPoints: TraceMatchedPoint[];
+  traceRouteComponents: TraceRouteComponent[];
+  continuity: TraceContinuitySummary;
+  rawTraceAttributes?: unknown | null;
+  rawTraceRoute?: unknown | null;
   warnings: TraceWarning[];
   errors: DebugError[];
   httpStatus: number | null;

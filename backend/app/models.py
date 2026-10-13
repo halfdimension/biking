@@ -190,6 +190,64 @@ class TraceWarning(_CamelModel):
     detail: Any | None = None
 
 
+class TraceMatchedPoint(_CamelModel):
+    """One normalized ``trace_attributes.matched_points`` record."""
+
+    index: int
+    lon: float
+    lat: float
+    type: Literal["matched", "interpolated", "unmatched"]
+    edge_index: int | None = Field(default=None, alias="edgeIndex")
+    distance_along_edge: float | None = Field(default=None, alias="distanceAlongEdge")
+    distance_from_trace_point: float | None = Field(
+        default=None, alias="distanceFromTracePoint"
+    )
+    begin_route_discontinuity: bool = Field(
+        default=False, alias="beginRouteDiscontinuity"
+    )
+    end_route_discontinuity: bool = Field(
+        default=False, alias="endRouteDiscontinuity"
+    )
+
+
+class TraceRouteLeg(_CamelModel):
+    """One trace-route leg, preserving its independently decoded shape."""
+
+    leg_index: int = Field(alias="legIndex")
+    geometry: list[tuple[float, float]]
+
+
+class TraceRouteComponent(_CamelModel):
+    """A path-level trace-route component, never a route alternative in the UI."""
+
+    index: int
+    label: str
+    geometry: list[tuple[float, float]]
+    legs: list[TraceRouteLeg]
+
+
+class TraceRouteBreak(_CamelModel):
+    """Straight geographic gap between adjacent trace-route components."""
+
+    index: int
+    previous_component_index: int = Field(alias="previousComponentIndex")
+    next_component_index: int = Field(alias="nextComponentIndex")
+    previous_end_coordinate: tuple[float, float] = Field(
+        alias="previousEndCoordinate"
+    )
+    next_start_coordinate: tuple[float, float] = Field(alias="nextStartCoordinate")
+    gap_meters: float = Field(alias="gapMeters")
+
+
+class TraceContinuitySummary(_CamelModel):
+    """Authoritative continuity result derived only from ``trace_route``."""
+
+    is_continuous: bool | None = Field(default=None, alias="isContinuous")
+    component_count: int = Field(default=0, alias="componentCount")
+    break_count: int = Field(default=0, alias="breakCount")
+    breaks: list[TraceRouteBreak] = Field(default_factory=list)
+
+
 class ValhallaTraceResponse(_CamelModel):
     """Independent result envelope for trace inspection."""
 
@@ -201,6 +259,17 @@ class ValhallaTraceResponse(_CamelModel):
     original_point_count: int = Field(alias="originalPointCount")
     trace_point_count: int = Field(alias="tracePointCount")
     geometry_deviation: Any | None = Field(default=None, alias="geometryDeviation")
+    matched_points: list[TraceMatchedPoint] = Field(
+        default_factory=list, alias="matchedPoints"
+    )
+    trace_route_components: list[TraceRouteComponent] = Field(
+        default_factory=list, alias="traceRouteComponents"
+    )
+    continuity: TraceContinuitySummary = Field(
+        default_factory=TraceContinuitySummary
+    )
+    raw_trace_attributes: Any | None = Field(default=None, alias="rawTraceAttributes")
+    raw_trace_route: Any | None = Field(default=None, alias="rawTraceRoute")
     segments: list[DebugSegment] = Field(default_factory=list)
     warnings: list[TraceWarning] = Field(default_factory=list)
     errors: list[DebugError] = Field(default_factory=list)
