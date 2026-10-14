@@ -106,12 +106,14 @@ describe("App layout shell", () => {
     expect(screen.getByTestId("map-view")).toBeInTheDocument();
   });
 
-  it("renders all seven bottom tab labels", async () => {
+  it("renders all bottom tab labels including Route Difference after Comparison", async () => {
     await renderApp();
     const tablist = screen.getByRole("tablist", { name: /Analysis panels/i });
     const labels = [
       "Comparison",
+      "Route Difference",
       "Edge Details",
+      "Route Analysis",
       "OSRM Raw Request",
       "OSRM Response",
       "Valhalla Raw Request",
@@ -131,6 +133,10 @@ describe("App layout shell", () => {
     // Default active tab is Comparison, which renders the comparison table.
     // With no routes yet it shows the empty-state hint.
     expect(panel).toHaveTextContent(/No routes yet/i);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Route Difference" }));
+    expect(panel).toHaveTextContent(/requires at least one OSRM route/i);
+    expect(screen.getByRole("tab", { name: "Route Difference" })).toHaveAttribute("aria-selected", "true");
 
     // Switch to the Assessment tab: it renders its own empty-state hint
     // ("run Compare to assess routes") distinct from the Comparison table.

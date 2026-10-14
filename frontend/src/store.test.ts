@@ -110,6 +110,16 @@ function resetStore() {
     routeAnalysisMetricId: "speed",
     routeAnalysisQuery: { field: "speed", operator: "=", value: "" },
     routeAnalysisExecutedSearch: null,
+    routeDifferenceOsrmRouteId: null,
+    routeDifferenceValhallaRouteId: null,
+    routeDifferenceStatus: "idle",
+    routeDifferenceResult: null,
+    routeDifferenceResultRevision: null,
+    routeDifferenceError: null,
+    routeDifferenceOverlayEnabled: true,
+    routeDifferenceFocusedIndex: null,
+    routeDifferenceFitRequestId: 0,
+    routeDifferenceFitIndex: null,
     testCases: [],
     quality: {},
     assessments: {},
@@ -229,6 +239,107 @@ describe("store", () => {
       await useStore.getState().runCompare();
       expect(useStore.getState().compareStatus).toBe("error");
       expect(useStore.getState().lastError).toBe("boom");
+    });
+  });
+
+  describe("route difference", () => {
+    async function compare(response = makeCompareResponse()) {
+      vi.mocked(api.compare).mockResolvedValue(response);
+      useStore.setState({
+        start: { lat: 1, lon: 1 },
+        dest: { lat: 2, lon: 2 },
+      });
+      await useStore.getState().runCompare();
+    }
+
+    it("defaults to each primary route after Compare", async () => {
+      await compare();
+      const state = useStore.getState();
+      expect(state.routeDifferenceOsrmRouteId).toBe("osrm:0");
+      expect(state.routeDifferenceValhallaRouteId).toBe("valhalla:0");
+      expect(state.routeDifferenceResult).toBeNull();
+      expect(state.routeDifferenceStatus).toBe("idle");
+    });
+
+    it("falls back to the first available route when no primary is present", async () => {
+      const response = makeCompareResponse();
+      response.osrm.normalizedRoutes = [route("osrm", 1)];
+      response.valhalla.normalizedRoutes = [route("valhalla", 2)];
+      await compare(response);
+      expect(useStore.getState().routeDifferenceOsrmRouteId).toBe("osrm:1");
+      expect(useStore.getState().routeDifferenceValhallaRouteId).toBe(
+        "valhalla:2",
+      );
+    });
+
+    it("analyzes the pair and binds the output to the result revision", async () => {
+      await compare();
+      useStore.getState().runRouteDifferenceAnalysis();
+      const state = useStore.getState();
+      expect(state.routeDifferenceStatus).toBe("ready");
+      expect(state.routeDifferenceResultRevision).toBe(
+        state.comparisonResultRevision,
+      );
+      expect(state.routeDifferenceResult?.osrmRouteId).toBe("osrm:0");
+      expect(state.routeDifferenceResult?.valhallaRouteId).toBe("valhalla:0");
+      expect(state.routeDifferenceOverlayEnabled).toBe(true);
+    });
+
+    it("clears an old result after a new successful Compare even when ids repeat", async () => {
+      await compare();
+      useStore.getState().runRouteDifferenceAnalysis();
+      expect(useStore.getState().routeDifferenceResult).not.toBeNull();
+      await compare();
+      const state = useStore.getState();
+      expect(state.comparisonResultRevision).toBe(2);
+      expect(state.routeDifferenceResult).toBeNull();
+      expect(state.routeDifferenceResultRevision).toBeNull();
+      expect(state.routeDifferenceFocusedIndex).toBeNull();
+    });
+
+    it("pair selectors invalidate analysis without changing normal selection", async () => {
+      await compare();
+      useStore.getState().selectRoute("valhalla:2");
+      useStore.getState().runRouteDifferenceAnalysis();
+      useStore.getState().setRouteDifferenceOsrmRouteId("osrm:1");
+      const state = useStore.getState();
+      expect(state.routeDifferenceOsrmRouteId).toBe("osrm:1");
+      expect(state.routeDifferenceResult).toBeNull();
+      expect(state.routeDifferenceStatus).toBe("idle");
+      expect(state.selectedRouteId).toBe("valhalla:2");
+    });
+
+    it("diagnostic overlay, focus, and fit actions mutate only their own slice", async () => {
+      await compare();
+      useStore.getState().selectRoute("osrm:1");
+      useStore.getState().runRouteDifferenceAnalysis();
+      const before = useStore.getState();
+
+      before.setRouteDifferenceOverlayEnabled(false);
+      useStore.getState().setRouteDifferenceFocusedIndex(0);
+      useStore.getState().fitRouteDifference(0);
+      const after = useStore.getState();
+
+      expect(after.routeDifferenceOverlayEnabled).toBe(false);
+      expect(after.routeDifferenceFocusedIndex).toBe(0);
+      expect(after.routeDifferenceFitIndex).toBe(0);
+      expect(after.routeDifferenceFitRequestId).toBe(1);
+      expect(after.selectedRouteId).toBe("osrm:1");
+      expect(after.routes).toBe(before.routes);
+      expect(after.visibility).toBe(before.visibility);
+      expect(after.routeAnalysisRouteId).toBe(before.routeAnalysisRouteId);
+      expect(after.edgeDebugEnabled).toBe(before.edgeDebugEnabled);
+    });
+
+    it("returns a clear error when either engine route is unavailable", () => {
+      useStore.setState({
+        routes: [route("osrm", 0)],
+        routeDifferenceOsrmRouteId: "osrm:0",
+        routeDifferenceValhallaRouteId: null,
+      });
+      useStore.getState().runRouteDifferenceAnalysis();
+      expect(useStore.getState().routeDifferenceStatus).toBe("error");
+      expect(useStore.getState().routeDifferenceError).toMatch(/both/i);
     });
   });
 

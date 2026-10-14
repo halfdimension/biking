@@ -12,6 +12,7 @@ import { render, act, fireEvent, screen } from "@testing-library/react";
 import MapView from "./MapView";
 import { useStore, type ExecutedRouteAnalysisSearch } from "../store";
 import type { CompareDebug, NormalizedRoute } from "../types";
+import { analyzeRouteDifference } from "../analysis/routeDifference";
 
 // MapLibre GL does not run under jsdom. This lifecycle-aware mock keeps sources,
 // layers, and event listeners per map instance so remount behavior can be tested.
@@ -266,6 +267,37 @@ function debugResult(): CompareDebug {
 function lastMap(): MockMap {
   return mapInstance;
 }
+
+function differenceFixture() {
+  const osrm = route({
+    id: "osrm:0",
+    coordinates: [[77, 28.6], [77.01, 28.6]],
+  });
+  const valhalla = route({
+    id: "valhalla:0",
+    engine: "valhalla",
+    coordinates: [
+      [77, 28.6], [77.003, 28.6], [77.004, 28.601],
+      [77.006, 28.601], [77.007, 28.6], [77.01, 28.6],
+    ],
+  });
+  return { osrm, valhalla, result: analyzeRouteDifference(osrm, valhalla) };
+}
+
+beforeEach(() => {
+  useStore.setState({
+    routeDifferenceOsrmRouteId: null,
+    routeDifferenceValhallaRouteId: null,
+    routeDifferenceStatus: "idle",
+    routeDifferenceResult: null,
+    routeDifferenceResultRevision: null,
+    routeDifferenceError: null,
+    routeDifferenceOverlayEnabled: true,
+    routeDifferenceFocusedIndex: null,
+    routeDifferenceFitRequestId: 0,
+    routeDifferenceFitIndex: null,
+  });
+});
 
 describe("MapView route rendering (Task 16)", () => {
   beforeEach(() => {
@@ -1528,5 +1560,129 @@ describe("MapView camera persistence", () => {
     useStore.getState().setTraceInspectorCamera(trace);
     expect(useStore.getState().routeComparisonCamera).toEqual(comparison);
     expect(useStore.getState().traceInspectorCamera).toEqual(trace);
+  });
+});
+
+describe("MapView Route Difference overlay", () => {
+  beforeEach(() => {
+    mapInstances = [];
+    unsettleStyleWhenRoutesSourceIsAdded = false;
+    debugQueryFeatures = [];
+    styleLoaded = true;
+    setDataSpy.mockClear();
+    vi.clearAllMocks();
+    useStore.setState({
+      routes: [],
+      visibility: {},
+      selectedRouteId: null,
+      start: null,
+      dest: null,
+      compareStatus: "idle",
+      fitRequestId: 0,
+      comparisonResultRevision: 4,
+      routeComparisonCamera: null,
+      routeComparisonCameraResultRevision: null,
+      edgeDebugEnabled: false,
+      debugResults: null,
+      routeAnalysisExecutedSearch: null,
+      routeAnalysisFocusedSegmentId: null,
+    });
+  });
+
+  it("does not create a source before an analysis exists", () => {
+    render(<MapView />);
+    expect(lastMap().getSource("route-difference")).toBeUndefined();
+    expect(
+      lastMap().addSource.mock.calls.some((call) => call[0] === "route-difference"),
+    ).toBe(false);
+  });
+
+  it("creates the true-geometry source and complete diagnostic layer set", () => {
+    const fixture = differenceFixture();
+    useStore.setState({
+      routeDifferenceResult: fixture.result,
+      routeDifferenceResultRevision: 4,
+      routeDifferenceOverlayEnabled: true,
+    });
+    render(<MapView />);
+    const map = lastMap();
+
+    expect(map.addSource).toHaveBeenCalledWith(
+      "route-difference",
+      expect.objectContaining({ type: "geojson" }),
+    );
+    const data = map.sourceData.get("route-difference") as {
+      features: Array<{ properties: { kind: string }; geometry: { coordinates: unknown } }>;
+    };
+    expect(data.features.map((feature) => feature.properties.kind)).toEqual(
+      expect.arrayContaining([
+        "shared",
+        "divergence-osrm",
+        "divergence-valhalla",
+        "split",
+        "rejoin",
+      ]),
+    );
+    expect(map.addLayer.mock.calls.map((call) => call[0].id)).toEqual(
+      expect.arrayContaining([
+        "route-difference-shared",
+        "route-difference-osrm",
+        "route-difference-valhalla",
+        "route-difference-splits",
+        "route-difference-rejoins",
+      ]),
+    );
+    expect(map.fitBounds).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Route difference legend")).toBeVisible();
+  });
+
+  it("updates focus and overlay data without recreating the map or moving camera", () => {
+    const fixture = differenceFixture();
+    useStore.setState({
+      routeDifferenceResult: fixture.result,
+      routeDifferenceResultRevision: 4,
+      routeDifferenceOverlayEnabled: true,
+    });
+    render(<MapView />);
+    const map = lastMap();
+    expect(mapInstances).toHaveLength(1);
+
+    act(() => useStore.getState().setRouteDifferenceFocusedIndex(0));
+    const focusedData = map.sourceData.get("route-difference") as {
+      features: Array<{ properties: { kind: string; focused: boolean } }>;
+    };
+    expect(
+      focusedData.features
+        .filter((feature) => feature.properties.kind.startsWith("divergence-"))
+        .every((feature) => feature.properties.focused),
+    ).toBe(true);
+    expect(mapInstances).toHaveLength(1);
+    expect(map.fitBounds).not.toHaveBeenCalled();
+
+    act(() => useStore.getState().setRouteDifferenceOverlayEnabled(false));
+    const hiddenData = map.sourceData.get("route-difference") as {
+      features: unknown[];
+    };
+    expect(hiddenData.features).toEqual([]);
+    expect(mapInstances).toHaveLength(1);
+  });
+
+  it("fits only after the explicit divergence fit signal", () => {
+    const fixture = differenceFixture();
+    useStore.setState({
+      routeDifferenceResult: fixture.result,
+      routeDifferenceResultRevision: 4,
+      routeDifferenceOverlayEnabled: true,
+    });
+    render(<MapView />);
+    const map = lastMap();
+    expect(map.fitBounds).not.toHaveBeenCalled();
+
+    act(() => useStore.getState().fitRouteDifference(0));
+    expect(map.fitBounds).toHaveBeenCalledOnce();
+    expect(map.fitBounds).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({ padding: 60, maxZoom: 15 }),
+    );
   });
 });

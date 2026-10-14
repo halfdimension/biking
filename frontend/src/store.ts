@@ -40,6 +40,10 @@ import type {
   RouteAttributeQuery,
   RouteQueryResult,
 } from "./analysis/routeQuery";
+import {
+  analyzeRouteDifference,
+  type RouteDifferenceResult,
+} from "./analysis/routeDifference";
 
 export type AppMode = "normal" | "advanced";
 export type MapClickTarget = "start" | "dest" | null;
@@ -47,6 +51,7 @@ export type CompareStatus = "idle" | "loading" | "done" | "error";
 export type RawStatus = "idle" | "loading" | "done" | "error";
 
 export type TraceStatus = "idle" | "loading" | "done" | "error";
+export type RouteDifferenceStatus = "idle" | "ready" | "error";
 
 export interface ExecutedRouteAnalysisSearch {
   comparisonResultRevision: number;
@@ -194,6 +199,19 @@ export interface AppState {
   routeAnalysisExecutedSearch: ExecutedRouteAnalysisSearch | null;
   /** Transient chart-origin focus; full segments remain in debugResults. */
   routeAnalysisFocusedSegmentId: string | null;
+
+  // Session-only geometric comparison. This pair is deliberately independent
+  // from selectedRouteId and is invalidated whenever comparison data changes.
+  routeDifferenceOsrmRouteId: string | null;
+  routeDifferenceValhallaRouteId: string | null;
+  routeDifferenceStatus: RouteDifferenceStatus;
+  routeDifferenceResult: RouteDifferenceResult | null;
+  routeDifferenceResultRevision: number | null;
+  routeDifferenceError: string | null;
+  routeDifferenceOverlayEnabled: boolean;
+  routeDifferenceFocusedIndex: number | null;
+  routeDifferenceFitRequestId: number;
+  routeDifferenceFitIndex: number | null;
 
   // Persistence-backed (Req 13, 14)
   testCases: TestCase[];
@@ -345,6 +363,12 @@ export interface AppState {
   clearRouteAnalysisSearch: () => void;
 
   setRouteAnalysisFocusedSegmentId: (id: string | null) => void;
+  setRouteDifferenceOsrmRouteId: (routeId: string) => void;
+  setRouteDifferenceValhallaRouteId: (routeId: string) => void;
+  runRouteDifferenceAnalysis: () => void;
+  setRouteDifferenceOverlayEnabled: (enabled: boolean) => void;
+  setRouteDifferenceFocusedIndex: (index: number | null) => void;
+  fitRouteDifference: (index: number) => void;
   /** Request a manual map fit (Req 20.2); MapView reacts to `fitRequestId`. */
   requestFit: () => void;
 
@@ -689,6 +713,16 @@ export const useStore = create<AppState>((set, get) => ({
   routeAnalysisExecutedSearch: null,
 
   routeAnalysisFocusedSegmentId: null,
+  routeDifferenceOsrmRouteId: null,
+  routeDifferenceValhallaRouteId: null,
+  routeDifferenceStatus: "idle",
+  routeDifferenceResult: null,
+  routeDifferenceResultRevision: null,
+  routeDifferenceError: null,
+  routeDifferenceOverlayEnabled: true,
+  routeDifferenceFocusedIndex: null,
+  routeDifferenceFitRequestId: 0,
+  routeDifferenceFitIndex: null,
   // Hydrate persisted test cases + assessments at store creation so a page
   // refresh restores saved scenarios (Req 13.3). Both loaders are safe and
   // never throw on corrupt storage (they degrade to []/{}).
@@ -782,6 +816,11 @@ export const useStore = create<AppState>((set, get) => ({
           ? prevSelected
           : null;
       const osrmRoutes = results.osrm.normalizedRoutes;
+      const valhallaRoutes = results.valhalla.normalizedRoutes;
+      const differenceOsrmRoute =
+        osrmRoutes.find((route) => route.isPrimary) ?? osrmRoutes[0];
+      const differenceValhallaRoute =
+        valhallaRoutes.find((route) => route.isPrimary) ?? valhallaRoutes[0];
       const selectedTraceRoute =
         osrmRoutes.find((route) => route.id === previous.traceSourceRouteId) ??
         osrmRoutes[0];
@@ -798,6 +837,15 @@ export const useStore = create<AppState>((set, get) => ({
         selectedRouteId,
         debugResults: includeDebug ? (results.debug ?? null) : null,
         routeAnalysisFocusedSegmentId: null,
+        routeDifferenceOsrmRouteId: differenceOsrmRoute?.id ?? null,
+        routeDifferenceValhallaRouteId: differenceValhallaRoute?.id ?? null,
+        routeDifferenceStatus: "idle",
+        routeDifferenceResult: null,
+        routeDifferenceResultRevision: null,
+        routeDifferenceError: null,
+        routeDifferenceOverlayEnabled: true,
+        routeDifferenceFocusedIndex: null,
+        routeDifferenceFitIndex: null,
         traceAnalysisFocusedSegmentId: null,
         compareStatus: "done",
         comparisonResultRevision: previous.comparisonResultRevision + 1,
@@ -1231,6 +1279,84 @@ export const useStore = create<AppState>((set, get) => ({
     if (get().routeAnalysisFocusedSegmentId === id) return;
     set({ routeAnalysisFocusedSegmentId: id });
   },
+
+  setRouteDifferenceOsrmRouteId: (routeId) =>
+    set((state) =>
+      state.routeDifferenceOsrmRouteId === routeId
+        ? {}
+        : {
+            routeDifferenceOsrmRouteId: routeId,
+            routeDifferenceStatus: "idle",
+            routeDifferenceResult: null,
+            routeDifferenceResultRevision: null,
+            routeDifferenceError: null,
+            routeDifferenceFocusedIndex: null,
+            routeDifferenceFitIndex: null,
+          },
+    ),
+
+  setRouteDifferenceValhallaRouteId: (routeId) =>
+    set((state) =>
+      state.routeDifferenceValhallaRouteId === routeId
+        ? {}
+        : {
+            routeDifferenceValhallaRouteId: routeId,
+            routeDifferenceStatus: "idle",
+            routeDifferenceResult: null,
+            routeDifferenceResultRevision: null,
+            routeDifferenceError: null,
+            routeDifferenceFocusedIndex: null,
+            routeDifferenceFitIndex: null,
+          },
+    ),
+
+  runRouteDifferenceAnalysis: () => {
+    const state = get();
+    const osrmRoute = state.routes.find(
+      (route) =>
+        route.engine === "osrm" &&
+        route.id === state.routeDifferenceOsrmRouteId,
+    );
+    const valhallaRoute = state.routes.find(
+      (route) =>
+        route.engine === "valhalla" &&
+        route.id === state.routeDifferenceValhallaRouteId,
+    );
+    if (!osrmRoute || !valhallaRoute) {
+      set({
+        routeDifferenceStatus: "error",
+        routeDifferenceResult: null,
+        routeDifferenceResultRevision: null,
+        routeDifferenceError:
+          "Both an OSRM route and a Valhalla route are required.",
+        routeDifferenceFocusedIndex: null,
+      });
+      return;
+    }
+    const result = analyzeRouteDifference(osrmRoute, valhallaRoute);
+    const invalid = result.warnings.length > 0;
+    set({
+      routeDifferenceStatus: invalid ? "error" : "ready",
+      routeDifferenceResult: result,
+      routeDifferenceResultRevision: state.comparisonResultRevision,
+      routeDifferenceError: invalid ? result.warnings.join(" ") : null,
+      routeDifferenceOverlayEnabled: true,
+      routeDifferenceFocusedIndex: null,
+      routeDifferenceFitIndex: null,
+    });
+  },
+
+  setRouteDifferenceOverlayEnabled: (routeDifferenceOverlayEnabled) =>
+    set({ routeDifferenceOverlayEnabled }),
+
+  setRouteDifferenceFocusedIndex: (routeDifferenceFocusedIndex) =>
+    set({ routeDifferenceFocusedIndex }),
+
+  fitRouteDifference: (index) =>
+    set((state) => ({
+      routeDifferenceFitIndex: index,
+      routeDifferenceFitRequestId: state.routeDifferenceFitRequestId + 1,
+    })),
 
   requestFit: () => set((state) => ({ fitRequestId: state.fitRequestId + 1 })),
 

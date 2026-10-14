@@ -13,9 +13,11 @@ import RawResponseInspector from "./RawResponseInspector";
 import Assessment from "./Assessment";
 import EdgeDetailsPanel from "./EdgeDetailsPanel";
 import RouteAnalysis from "./RouteAnalysis";
+import RouteDifference from "./RouteDifference";
 
 const TABS = [
   "Comparison",
+  "Route Difference",
   "Edge Details",
   "Route Analysis",
   "OSRM Raw Request",
@@ -143,6 +145,8 @@ export default function BottomTabs({
       >
         {active === "Comparison" ? (
           <ComparisonTable />
+        ) : active === "Route Difference" ? (
+          <RouteDifference />
         ) : active === "Edge Details" ? (
           <EdgeDetailsPanel />
         ) : active === "Route Analysis" ? (

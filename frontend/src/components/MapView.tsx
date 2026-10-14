@@ -51,6 +51,11 @@ import {
   buildAnalysisFocusFeatureCollection,
 } from "../map/analysisFocus";
 import {
+  buildRouteDifferenceFeatureCollection,
+  routeDifferenceLayerSpecs,
+  ROUTE_DIFFERENCE_SOURCE_ID,
+} from "../map/routeDifference";
+import {
   ROUTES_SOURCE_ID,
   HIT_LAYER_ID,
   DEBUG_HIT_LAYER_ID,
@@ -279,6 +284,22 @@ export default function MapView() {
     (s) => s.routeAnalysisFocusedSegmentId,
   );
   const routeAnalysisRouteId = useStore((s) => s.routeAnalysisRouteId);
+  const routeDifferenceResult = useStore((s) => s.routeDifferenceResult);
+  const routeDifferenceResultRevision = useStore(
+    (s) => s.routeDifferenceResultRevision,
+  );
+  const routeDifferenceOverlayEnabled = useStore(
+    (s) => s.routeDifferenceOverlayEnabled,
+  );
+  const routeDifferenceFocusedIndex = useStore(
+    (s) => s.routeDifferenceFocusedIndex,
+  );
+  const routeDifferenceFitRequestId = useStore(
+    (s) => s.routeDifferenceFitRequestId,
+  );
+  const routeDifferenceFitIndex = useStore(
+    (s) => s.routeDifferenceFitIndex,
+  );
   const debugSegmentLookup = useMemo(
     () => buildDebugSegmentLookup(debugResults),
     [debugResults],
@@ -305,6 +326,7 @@ export default function MapView() {
   const [overlapChooser, setOverlapChooser] =
     useState<OverlapChooserState | null>(null);
   const [routeStyleExpanded, setRouteStyleExpanded] = useState(false);
+  const [differenceLegendExpanded, setDifferenceLegendExpanded] = useState(true);
   const [tilted, setTilted] = useState(() => {
     const state = useStore.getState();
     return (
@@ -622,6 +644,91 @@ export default function MapView() {
   useEffect(() => {
     setOverlapChooser(null);
   }, [comparisonResultRevision]);
+
+  // --- Route Difference true-geometry source + layers ---------------------
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    let waitingForIdle = false;
+    const handleIdle = () => {
+      waitingForIdle = false;
+      apply();
+    };
+    const scheduleWhenStyleSettles = () => {
+      if (waitingForIdle || !map.once) return;
+      waitingForIdle = true;
+      map.once("idle", handleIdle);
+    };
+
+    const apply = () => {
+      const result =
+        routeDifferenceResultRevision === comparisonResultRevision
+          ? routeDifferenceResult
+          : null;
+      const existing = map.getSource(ROUTE_DIFFERENCE_SOURCE_ID) as
+        | maplibregl.GeoJSONSource
+        | undefined;
+      if (!result && !existing) return;
+
+      const styleWasReady = Boolean(map.isStyleLoaded?.());
+      const data = buildRouteDifferenceFeatureCollection(
+        result,
+        routeDifferenceOverlayEnabled,
+        routeDifferenceFocusedIndex,
+      );
+      if (existing) {
+        existing.setData(data as unknown as GeoJSON.FeatureCollection);
+      } else {
+        if (!styleWasReady) {
+          scheduleWhenStyleSettles();
+          return;
+        }
+        map.addSource(ROUTE_DIFFERENCE_SOURCE_ID, {
+          type: "geojson",
+          data: data as unknown as GeoJSON.FeatureCollection,
+        });
+      }
+
+      if (!styleWasReady) {
+        scheduleWhenStyleSettles();
+        return;
+      }
+      const beforeAnalysisOrDebug = map.getLayer(ANALYSIS_MATCH_GLOW_LAYER_ID)
+        ? ANALYSIS_MATCH_GLOW_LAYER_ID
+        : map.getLayer(ANALYSIS_FOCUS_GLOW_LAYER_ID)
+          ? ANALYSIS_FOCUS_GLOW_LAYER_ID
+          : map.getLayer(DEBUG_HIGHLIGHT_LAYER_ID)
+            ? DEBUG_HIGHLIGHT_LAYER_ID
+            : undefined;
+      for (const layer of routeDifferenceLayerSpecs()) {
+        if (map.getLayer(layer.id)) continue;
+        const specification = layer as unknown as maplibregl.LayerSpecification;
+        if (beforeAnalysisOrDebug) {
+          map.addLayer(specification, beforeAnalysisOrDebug);
+        } else {
+          map.addLayer(specification);
+        }
+      }
+    };
+
+    map.on("style.load", apply);
+    if (map.getSource(ROUTE_DIFFERENCE_SOURCE_ID) || map.isStyleLoaded?.()) {
+      apply();
+    } else {
+      scheduleWhenStyleSettles();
+    }
+    return () => {
+      map.off("style.load", apply);
+      if (waitingForIdle) map.off("idle", handleIdle);
+    };
+  }, [
+    comparisonResultRevision,
+    routeDifferenceFocusedIndex,
+    routeDifferenceOverlayEnabled,
+    routeDifferenceResult,
+    routeDifferenceResultRevision,
+  ]);
 
   // --- Additive Route Analysis match source + layers -----------------------
   useEffect(() => {
@@ -1010,6 +1117,37 @@ export default function MapView() {
     fitTo(map, coords);
   }, [fitRequestId, routes, start, dest]);
 
+  // A divergence changes the camera only through the explicit Fit on map action.
+  const previousDifferenceFitRequestId = useRef(routeDifferenceFitRequestId);
+  useEffect(() => {
+    if (
+      routeDifferenceFitRequestId === previousDifferenceFitRequestId.current
+    ) {
+      return;
+    }
+    previousDifferenceFitRequestId.current = routeDifferenceFitRequestId;
+    const map = mapRef.current;
+    if (!map || routeDifferenceFitIndex == null) return;
+    if (routeDifferenceResultRevision !== comparisonResultRevision) return;
+    const divergence = routeDifferenceResult?.divergences.find(
+      (item) => item.index === routeDifferenceFitIndex,
+    );
+    if (!divergence) return;
+    const coords = [
+      ...divergence.osrmGeometry,
+      ...divergence.valhallaGeometry,
+    ];
+    if (coords.length === 0) return;
+    pendingResultFitRef.current = true;
+    fitTo(map, coords);
+  }, [
+    comparisonResultRevision,
+    routeDifferenceFitIndex,
+    routeDifferenceFitRequestId,
+    routeDifferenceResult,
+    routeDifferenceResultRevision,
+  ]);
+
   // --- Resize on layout collapse/expand (belt-and-suspenders) --------------
   // The ResizeObserver installed in the init effect already fires when the map
   // container's box changes (sidebar width / bottom-panel height). But CSS
@@ -1136,6 +1274,39 @@ export default function MapView() {
           </div>
         )}
       </div>
+      {routeDifferenceOverlayEnabled &&
+      routeDifferenceResult &&
+      routeDifferenceResultRevision === comparisonResultRevision ? (
+        <div
+          className={
+            "route-difference-legend" +
+            (differenceLegendExpanded
+              ? " route-difference-legend--expanded"
+              : "")
+          }
+          aria-label="Route difference legend"
+        >
+          <button
+            type="button"
+            className="route-difference-legend__header"
+            aria-expanded={differenceLegendExpanded}
+            onClick={() => setDifferenceLegendExpanded((expanded) => !expanded)}
+          >
+            <span>Route difference</span>
+            <span aria-hidden="true">{differenceLegendExpanded ? "▴" : "▾"}</span>
+          </button>
+          {differenceLegendExpanded ? (
+            <div className="route-difference-legend__body">
+              <span><i className="route-difference-legend__line route-difference-legend__line--shared" />Shared corridor</span>
+              <span><i className="route-difference-legend__line route-difference-legend__line--osrm" />OSRM divergence</span>
+              <span><i className="route-difference-legend__line route-difference-legend__line--valhalla" />Valhalla divergence</span>
+              <span><i className="route-difference-legend__point route-difference-legend__point--split" />Split</span>
+              <span><i className="route-difference-legend__point route-difference-legend__point--rejoin" />Rejoin</span>
+              <small>True route geometry</small>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       <EdgeDebugInspector />
       {overlapChooser && (
         <div
