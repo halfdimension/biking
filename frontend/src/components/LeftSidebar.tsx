@@ -36,6 +36,7 @@ function MapSelection() {
         aria-pressed={mapClickTarget === "start"}
         onClick={() => arm("start")}
       >
+        <span className="map-selection__dot map-selection__dot--start" aria-hidden="true" />
         Set Start on Map
       </button>
       <button
@@ -47,6 +48,7 @@ function MapSelection() {
         aria-pressed={mapClickTarget === "dest"}
         onClick={() => arm("dest")}
       >
+        <span className="map-selection__dot map-selection__dot--dest" aria-hidden="true" />
         Set Destination on Map
       </button>
       <p className="map-selection__hint">

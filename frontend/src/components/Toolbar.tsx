@@ -23,6 +23,7 @@ function HealthIndicator({
   name: string;
   status: EngineHealth;
 }) {
+  const shortName = name.replace(/^Local /, "");
   return (
     <span className="health-indicator" title={`${name}: ${HEALTH_LABEL[status]}`}>
       <span
@@ -30,9 +31,8 @@ function HealthIndicator({
         aria-hidden="true"
         data-testid={`health-dot-${name.toLowerCase().replace(/^local /, "")}`}
       />
-      <span>
-        {name}: {HEALTH_LABEL[status]}
-      </span>
+      <span className="health-indicator__label">{shortName}</span>
+      <span className="sr-only">: {HEALTH_LABEL[status]}</span>
     </span>
   );
 }
@@ -57,73 +57,37 @@ export default function Toolbar() {
         Bike Routing Comparison &amp; Debugging Dashboard
       </h1>
 
-      <div className="toolbar__target" aria-label="Routing target">
-        <span>Routing:</span>
-        <button
-          type="button"
-          aria-pressed={routingTarget === "local"}
-          className={routingTarget === "local" ? "toolbar__target-active" : ""}
-          onClick={() => setRoutingTarget("local")}
-        >
-          Local
-        </button>
-        <button
-          type="button"
-          aria-pressed={routingTarget === "prod"}
-          className={routingTarget === "prod" ? "toolbar__target-active" : ""}
-          onClick={() => setRoutingTarget("prod")}
-        >
-          Prod
-        </button>
+      <div className="toolbar__actions">
+        <div className="toolbar__target" aria-label="Routing target">
+          <span>Routing</span>
+          <div className="toolbar__segmented">
+            <button type="button" aria-pressed={routingTarget === "local"} className={routingTarget === "local" ? "toolbar__target-active" : ""} onClick={() => setRoutingTarget("local")}>Local</button>
+            <button type="button" aria-pressed={routingTarget === "prod"} className={routingTarget === "prod" ? "toolbar__target-active" : ""} onClick={() => setRoutingTarget("prod")}>Prod</button>
+          </div>
+        </div>
+
+        <div className="toolbar__control-group">
+          <button type="button" className="toolbar__compare-btn" onClick={() => void runCompare()} disabled={isLoading}>
+            {isLoading ? <span className="button-spinner" aria-hidden="true" /> : null}
+            {isLoading ? "Comparing…" : "Compare Routes"}
+          </button>
+          <button type="button" className={`toolbar__debug-btn${edgeDebugEnabled ? " toolbar__debug-btn--active" : ""}`} aria-pressed={edgeDebugEnabled} disabled={routingTarget === "prod"} title={routingTarget === "prod" ? "Edge Debug is available for Local Valhalla only." : undefined} onClick={() => setEdgeDebugEnabled(!edgeDebugEnabled)}>
+            <span className="toolbar__debug-dot" aria-hidden="true" />
+            Edge Debug: {edgeDebugEnabled ? "ON" : "OFF"}
+          </button>
+        </div>
+
+        <div className="toolbar__control-group toolbar__control-group--map">
+          <button type="button" className="toolbar__fit-btn" onClick={() => requestFit()}>
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2H2v4M10 2h4v4M6 14H2v-4M10 14h4v-4" /></svg>
+            Fit Routes
+          </button>
+          <button type="button" className="toolbar__focus-btn" data-testid="focus-map" title="Focus Map" onClick={() => focusMap()}>
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2H2v4M10 2h4v4M6 14H2v-4M10 14h4v-4" /><path d="M5 5h6v6H5z" /></svg>
+            Focus Map
+          </button>
+        </div>
       </div>
-
-      <button
-        type="button"
-        className="toolbar__compare-btn"
-        onClick={() => void runCompare()}
-        disabled={isLoading}
-      >
-        {isLoading ? "Comparing…" : "Compare Routes"}
-      </button>
-
-      <button
-        type="button"
-        className={`toolbar__debug-btn${edgeDebugEnabled ? " toolbar__debug-btn--active" : ""}`}
-        aria-pressed={edgeDebugEnabled}
-        disabled={routingTarget === "prod"}
-        title={
-          routingTarget === "prod"
-            ? "Edge Debug is available for Local Valhalla only."
-            : undefined
-        }
-        onClick={() => setEdgeDebugEnabled(!edgeDebugEnabled)}
-      >
-        Edge Debug: {edgeDebugEnabled ? "ON" : "OFF"}
-      </button>
-
-      {/* Manual re-frame control (Req 20.2). Uses the same fit routine as the
-          post-Compare auto-fit; falls back to start/dest markers when no routes
-          exist (Req 20.3). */}
-      <button
-        type="button"
-        className="toolbar__fit-btn"
-        onClick={() => requestFit()}
-      >
-        Fit Routes
-      </button>
-
-      {/* Focus Map: a two-state toggle. First click collapses all three panels
-          (remembering their prior states); a second click restores them. UI
-          layout only — never touches routing/results/selection. */}
-      <button
-        type="button"
-        className="toolbar__focus-btn"
-        data-testid="focus-map"
-        title="Focus Map"
-        onClick={() => focusMap()}
-      >
-        Focus Map
-      </button>
 
       {compareStatus === "error" && lastError ? (
         <span className="compare-error" role="alert">

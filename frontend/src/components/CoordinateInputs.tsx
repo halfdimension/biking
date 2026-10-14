@@ -132,7 +132,7 @@ function PointInputs({ point, label, coord, setCoord }: PointInputsProps) {
   }
 
   return (
-    <fieldset className="coord-point">
+    <fieldset className={`coord-point coord-point--${point}`}>
       <legend className="coord-point__legend">{label}</legend>
       <AxisField
         id={`${point}-lat`}

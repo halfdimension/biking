@@ -1099,7 +1099,7 @@ export default function MapView() {
             {!routeStyleExpanded && (
               <>
                 {" · "}
-                <strong>{routeSeparationEnabled ? "ON" : "OFF"}</strong>
+                <strong className={routeSeparationEnabled ? "route-style-control__state route-style-control__state--on" : "route-style-control__state"}>{routeSeparationEnabled ? "ON" : "OFF"}</strong>
               </>
             )}
           </span>
@@ -1145,14 +1145,15 @@ export default function MapView() {
           style={{ left: overlapChooser.x, top: overlapChooser.y }}
           onClick={(event) => event.stopPropagation()}
         >
-          <div className="route-overlap-chooser__title">Routes here</div>
+          <div className="route-overlap-chooser__title"><strong>Routes here</strong><span>Choose a route</span></div>
           {overlapChooser.candidates.map((candidate) => {
             const route = routes.find((item) => item.id === candidate.routeId);
             if (!route) return null;
             return (
               <button
                 type="button"
-                className="route-overlap-chooser__item"
+                className={"route-overlap-chooser__item" + (candidate.routeId === selectedRouteId ? " route-overlap-chooser__item--selected" : "")}
+                aria-label={route.label}
                 key={candidate.routeId}
                 onClick={() => chooseOverlappingRoute(candidate.routeId)}
               >
@@ -1165,7 +1166,9 @@ export default function MapView() {
                   style={{ color: routeColor(route.engine, route.index) }}
                   aria-hidden="true"
                 />
-                <span>{route.label}</span>
+                <span className="route-overlap-chooser__label">{route.label}</span>
+                <span className="route-overlap-chooser__badge">{route.isPrimary ? "Primary" : "Alt"}</span>
+                {candidate.routeId === selectedRouteId ? <span className="route-overlap-chooser__check" aria-label="Selected">✓</span> : null}
               </button>
             );
           })}

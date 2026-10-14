@@ -51,18 +51,17 @@ export default function SelectedRouteInfo() {
     <div className="selected-route" data-testid="selected-route">
       <div className="selected-route__header">
         <span
-          className="selected-route__swatch"
+          className={route.isPrimary ? "selected-route__swatch selected-route__swatch--primary" : "selected-route__swatch selected-route__swatch--alternative"}
           aria-hidden="true"
-          style={{ background: routeColor(route.engine, route.index) }}
+          style={{ color: routeColor(route.engine, route.index) }}
         />
         <span className="selected-route__title">{route.label}</span>
+        <span className="selected-route__badge">{kind}</span>
       </div>
 
       <dl className="selected-route__fields">
         <dt>Engine</dt>
         <dd>{engineName}</dd>
-        <dt>Type</dt>
-        <dd>{kind}</dd>
         <dt>Distance</dt>
         <dd>{formatDistanceKm(route.distanceMeters)}</dd>
         <dt>Duration</dt>

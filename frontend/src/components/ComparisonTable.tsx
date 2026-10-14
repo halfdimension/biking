@@ -84,18 +84,18 @@ export default function ComparisonTable() {
                   }
                 }}
               >
-                <td>{engineName(route.engine)}</td>
+                <td><span className={`comparison-table__engine comparison-table__engine--${route.engine}`}>{engineName(route.engine)}</span></td>
                 <td>
                   <span className="comparison-table__label">
                     <span
-                      className="comparison-table__swatch"
+                      className={route.isPrimary ? "comparison-table__swatch comparison-table__swatch--primary" : "comparison-table__swatch comparison-table__swatch--alternative"}
                       aria-hidden="true"
-                      style={{ background: routeColor(route.engine, route.index) }}
+                      style={{ color: routeColor(route.engine, route.index) }}
                     />
                     {route.label}
                   </span>
                 </td>
-                <td>{route.isPrimary ? "Primary" : "Alternate"}</td>
+                <td><span className={`comparison-table__type${route.isPrimary ? " comparison-table__type--primary" : ""}`}>{route.isPrimary ? "Primary" : "Alternate"}</span></td>
                 <td className="comparison-table__num">
                   {formatDistanceKm(route.distanceMeters)}
                 </td>
