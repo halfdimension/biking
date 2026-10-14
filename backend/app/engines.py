@@ -49,7 +49,7 @@ def _url_contains_secret(url: str) -> bool:
         path_parts = parts.path.split("/")
         has_token_path = any(
             path_parts[index] == "v1"
-            and path_parts[index + 2] == "route_adv"
+            and path_parts[index + 2] == "route_eta"
             for index in range(len(path_parts) - 2)
         )
         has_token_query = any(
@@ -71,7 +71,7 @@ def redact_url(url: str) -> str:
         for index in range(len(path_parts) - 2):
             if (
                 path_parts[index] == "v1"
-                and path_parts[index + 2] == "route_adv"
+                and path_parts[index + 2] == "route_eta"
             ):
                 path_parts[index + 1] = "<REDACTED>"
         query = urlencode(

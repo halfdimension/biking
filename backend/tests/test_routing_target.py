@@ -45,7 +45,7 @@ def test_prod_osrm_builder_semantics() -> None:
     parsed = urlsplit(build_prod_osrm_url(START, DEST, TOKEN))
     query = parse_qs(parsed.query)
     assert parsed.hostname == config.CANONICAL_PROD_HOST
-    assert f"/v1/{TOKEN}/route_adv/biking/" in parsed.path
+    assert f"/v1/{TOKEN}/route_eta/biking/" in parsed.path
     assert parsed.path.endswith(
         "77.36783435642826,28.651770012429765;"
         "77.11696030930938,28.631769137973578"
@@ -150,7 +150,7 @@ def test_prod_compare_uses_get_and_reuses_normalizers(monkeypatch: pytest.Monkey
 
     async def fake(method: str, url: str, **kwargs: object) -> EngineCallResult:
         calls.append((method, url, kwargs.get("allowed_hosts")))
-        return _ok_osrm_call() if "/route_adv/" in url else _ok_valhalla_call()
+        return _ok_osrm_call() if "/route_eta/" in url else _ok_valhalla_call()
 
     monkeypatch.setattr(routes, "call_engine", fake)
     response = client.post("/api/compare", json={**BODY, "target": "prod"})
@@ -173,7 +173,7 @@ def test_prod_http_errors_are_isolated_and_redacted(
     monkeypatch.setattr(config, "MAPPLS_PROD_ACCESS_TOKEN", TOKEN)
 
     async def fake(method: str, url: str, **kwargs: object) -> EngineCallResult:
-        if "/route_adv/" in url:
+        if "/route_eta/" in url:
             return _ok_osrm_call()
         response = httpx.Response(status, json={"error": f"upstream rejected {TOKEN}"})
         return EngineCallResult(
@@ -202,7 +202,7 @@ def test_prod_invalid_json_and_no_routes_are_structured(monkeypatch: pytest.Monk
     async def fake(method: str, url: str, **kwargs: object) -> EngineCallResult:
         response = (
             httpx.Response(200, content=b"not-json")
-            if "/route_adv/" in url
+            if "/route_eta/" in url
             else httpx.Response(200, json={"error": "No path"})
         )
         return EngineCallResult(True, response, 200, 2.0, None)
@@ -230,7 +230,7 @@ def test_prod_timeout_message_redacts_both_token_positions() -> None:
     ))
     assert TOKEN not in osrm.error.message
     assert TOKEN not in valhalla.error.message
-    assert "/v1/<REDACTED>/route_adv/" in osrm.error.message
+    assert "/v1/<REDACTED>/route_eta/biking/" in osrm.error.message
     assert "access_token=<REDACTED>" in valhalla.error.message
     assert osrm.error.detail is None and valhalla.error.detail is None
 

@@ -114,7 +114,7 @@ describe("routing target", () => {
 
     useStore.getState().setRoutingTarget("prod");
     render(<RequestPreview />);
-    expect(screen.getByText(/advancedmaps\/v1\/<TOKEN>\/route_adv\/biking/)).toBeInTheDocument();
+    expect(screen.getByText(/advancedmaps\/v1\/<TOKEN>\/route_eta\/biking/)).toBeInTheDocument();
     expect(screen.getByText(/access_token=<TOKEN>/)).toBeInTheDocument();
     expect(document.body.textContent).not.toContain("TEST_TOKEN_DO_NOT_USE");
   });

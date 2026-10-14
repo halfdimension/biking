@@ -62,7 +62,7 @@ export function buildProdOsrmPreviewUrl(
   dest: Coordinate,
 ): string {
   const coords = `${start.lon},${start.lat};${dest.lon},${dest.lat}`;
-  return `https://apis.mapmyindia.com/advancedmaps/v1/<TOKEN>/route_adv/biking/${coords}?${PROD_OSRM_QUERY}`;
+  return `https://apis.mapmyindia.com/advancedmaps/v1/<TOKEN>/route_eta/biking/${coords}?${PROD_OSRM_QUERY}`;
 }
 
 export function buildProdValhallaPreviewUrl(

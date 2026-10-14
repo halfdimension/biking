@@ -24,7 +24,7 @@ def build_prod_osrm_url(start: Coordinate, dest: Coordinate, token: str) -> str:
         ]
     )
     return (
-        f"{config.MAPPLS_PROD_OSRM_BASE_URL}/{token}/route_adv/biking/"
+        f"{config.MAPPLS_PROD_OSRM_BASE_URL}/{token}/route_eta/biking/"
         f"{coords}?{query}"
     )
 

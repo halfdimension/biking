@@ -145,7 +145,7 @@ describe("production request previews", () => {
 
   it("shows the exact Prod OSRM semantics with a placeholder token", () => {
     const url = buildProdOsrmPreviewUrl(start, dest);
-    expect(url).toContain("/advancedmaps/v1/<TOKEN>/route_adv/biking/");
+    expect(url).toContain("/advancedmaps/v1/<TOKEN>/route_eta/biking/");
     expect(url).toContain(`${start.lon},${start.lat};${dest.lon},${dest.lat}`);
     expect(url).toContain("steps=false");
     expect(url).not.toContain("steps=true");
