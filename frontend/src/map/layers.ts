@@ -21,13 +21,26 @@
 
 export const ROUTES_SOURCE_ID = "routes";
 export const HIT_LAYER_ID = "routes-hit";
-export const BASE_LAYER_ID = "routes-base";
-export const SELECTED_LAYER_ID = "routes-selected";
+export const ALTERNATES_LAYER_ID = "routes-alternates";
+export const PRIMARY_LAYER_ID = "routes-primary";
+export const SELECTED_HALO_LAYER_ID = "routes-selected-halo";
+export const SELECTED_ALTERNATE_LAYER_ID = "routes-selected-alternate";
+export const SELECTED_PRIMARY_LAYER_ID = "routes-selected-primary";
 
 /** `feature-state.visible`, defaulting to true when unset. */
 const VISIBLE_EXPR = ["boolean", ["feature-state", "visible"], true] as const;
 /** `feature-state.selected`, defaulting to false when unset. */
 const SELECTED_EXPR = ["boolean", ["feature-state", "selected"], false] as const;
+/** Display-only separation; defaults on until feature-state is initialized. */
+export const ROUTE_LINE_OFFSET_EXPRESSION = [
+  "case",
+  ["boolean", ["feature-state", "separated"], true],
+  ["get", "displayOffsetPx"],
+  0,
+] as const;
+
+const PRIMARY_FILTER = ["==", ["get", "isPrimary"], true] as const;
+const ALTERNATE_FILTER = ["==", ["get", "isPrimary"], false] as const;
 
 /**
  * `routes-hit` — transparent wide line used only for click hit-testing (Task 20).
@@ -45,6 +58,7 @@ export function hitLayerSpec() {
       "line-opacity": 0,
       // Wide clickable padding when visible, 0 (non-hittable) when hidden.
       "line-width": ["case", VISIBLE_EXPR, 16, 0],
+      "line-offset": ROUTE_LINE_OFFSET_EXPRESSION,
     },
   };
 }
@@ -61,11 +75,12 @@ export function hitLayerSpec() {
  * additive and is supplied by `routes-selected`, which is stacked above this
  * layer. Hidden routes remain fully transparent.
  */
-export function baseLayerSpec() {
+export function alternatesLayerSpec() {
   return {
-    id: BASE_LAYER_ID,
+    id: ALTERNATES_LAYER_ID,
     type: "line" as const,
     source: ROUTES_SOURCE_ID,
+    filter: ALTERNATE_FILTER,
     layout: { "line-cap": "round" as const, "line-join": "round" as const },
     paint: {
       "line-color": ["get", "color"],
@@ -74,16 +89,29 @@ export function baseLayerSpec() {
         ["linear"],
         ["zoom"],
         8,
-        ["case", ["get", "isPrimary"], 5, 4],
+        4,
         14,
-        ["case", ["get", "isPrimary"], 7, 6],
+        6,
       ],
-      "line-opacity": [
-        "case",
-        VISIBLE_EXPR,
-        0.85,
-        0,
-      ],
+      "line-opacity": ["case", VISIBLE_EXPR, 0.85, 0],
+      "line-dasharray": [2, 1.5],
+      "line-offset": ROUTE_LINE_OFFSET_EXPRESSION,
+    },
+  };
+}
+
+export function primaryLayerSpec() {
+  return {
+    id: PRIMARY_LAYER_ID,
+    type: "line" as const,
+    source: ROUTES_SOURCE_ID,
+    filter: PRIMARY_FILTER,
+    layout: { "line-cap": "round" as const, "line-join": "round" as const },
+    paint: {
+      "line-color": ["get", "color"],
+      "line-width": ["interpolate", ["linear"], ["zoom"], 8, 5, 14, 7],
+      "line-opacity": ["case", VISIBLE_EXPR, 0.85, 0],
+      "line-offset": ROUTE_LINE_OFFSET_EXPRESSION,
     },
   };
 }
@@ -105,12 +133,39 @@ export function baseLayerSpec() {
  * selected route never draws on top. So `interpolate` stays top-level and the
  * `drawn` case lives in each stop OUTPUT — same shape as `routes-base`.
  */
-export function selectedLayerSpec() {
+export function selectedHaloLayerSpec() {
   const drawn = ["all", VISIBLE_EXPR, SELECTED_EXPR] as const;
   return {
-    id: SELECTED_LAYER_ID,
+    id: SELECTED_HALO_LAYER_ID,
     type: "line" as const,
     source: ROUTES_SOURCE_ID,
+    layout: { "line-cap": "round" as const, "line-join": "round" as const },
+    paint: {
+      "line-color": "#ffffff",
+      "line-width": [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        8,
+        ["case", drawn, 10, 0],
+        14,
+        ["case", drawn, 12, 0],
+      ],
+      "line-opacity": ["case", drawn, 0.95, 0],
+      "line-offset": ROUTE_LINE_OFFSET_EXPRESSION,
+    },
+  };
+}
+
+function selectedRouteLayerSpec(isPrimary: boolean) {
+  const drawn = ["all", VISIBLE_EXPR, SELECTED_EXPR] as const;
+  const overviewWidth = isPrimary ? 7 : 6;
+  const zoomedWidth = isPrimary ? 9 : 8;
+  return {
+    id: isPrimary ? SELECTED_PRIMARY_LAYER_ID : SELECTED_ALTERNATE_LAYER_ID,
+    type: "line" as const,
+    source: ROUTES_SOURCE_ID,
+    filter: isPrimary ? PRIMARY_FILTER : ALTERNATE_FILTER,
     layout: { "line-cap": "round" as const, "line-join": "round" as const },
     paint: {
       "line-color": ["get", "color"],
@@ -119,13 +174,23 @@ export function selectedLayerSpec() {
         ["linear"],
         ["zoom"],
         8,
-        ["case", drawn, 8, 0],
+        ["case", drawn, overviewWidth, 0],
         14,
-        ["case", drawn, 10, 0],
+        ["case", drawn, zoomedWidth, 0],
       ],
       "line-opacity": ["case", drawn, 1, 0],
+      ...(isPrimary ? {} : { "line-dasharray": [2, 1.5] }),
+      "line-offset": ROUTE_LINE_OFFSET_EXPRESSION,
     },
   };
+}
+
+export function selectedAlternateLayerSpec() {
+  return selectedRouteLayerSpec(false);
+}
+
+export function selectedPrimaryLayerSpec() {
+  return selectedRouteLayerSpec(true);
 }
 
 export const DEBUG_HIGHLIGHT_LAYER_ID = "route-debug-highlight";

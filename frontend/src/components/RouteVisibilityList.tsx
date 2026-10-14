@@ -80,9 +80,13 @@ export default function RouteVisibilityList({
               onClick={() => selectRoute(route.id)}
             >
               <span
-                className="route-row__swatch"
+                className={
+                  route.isPrimary
+                    ? "route-row__line-sample route-row__line-sample--primary"
+                    : "route-row__line-sample route-row__line-sample--alternative"
+                }
                 aria-hidden="true"
-                style={{ background: routeColor(route.engine, route.index) }}
+                style={{ color: routeColor(route.engine, route.index) }}
               />
               <span className="route-row__label">{route.label}</span>
             </button>

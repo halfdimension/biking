@@ -5,7 +5,11 @@
  * is exercised at the Task 19 real-map checkpoint, not here.
  */
 import { describe, it, expect } from "vitest";
-import { buildRoutesFeatureCollection, defaultRouteColor } from "./routes";
+import {
+  buildRoutesFeatureCollection,
+  defaultRouteColor,
+  routeDisplayOffset,
+} from "./routes";
 import { routeColor } from "./color";
 import type { NormalizedRoute } from "../types";
 
@@ -71,6 +75,11 @@ describe("buildRoutesFeatureCollection", () => {
       expect(f.properties.index).toBe(r.index);
       expect(f.properties.isPrimary).toBe(r.isPrimary);
       expect(f.properties.color).toBe(defaultRouteColor(r));
+      expect(f.properties.displayOffsetPx).toBe(
+        routeDisplayOffset(r.engine, r.index),
+      );
+      // The rendering-only offset must never create or mutate geometry.
+      expect(f.geometry.coordinates).toBe(r.coordinates);
       // No top-level feature id — identity comes from promoteId.
       expect((f as unknown as Record<string, unknown>).id).toBeUndefined();
     });
@@ -101,5 +110,29 @@ describe("buildRoutesFeatureCollection", () => {
     const fc = buildRoutesFeatureCollection([]);
     expect(fc.type).toBe("FeatureCollection");
     expect(fc.features).toEqual([]);
+  });
+});
+
+describe("routeDisplayOffset", () => {
+  it("places OSRM and Valhalla on opposite visual sides", () => {
+    expect(routeDisplayOffset("osrm", 0)).toBe(-3);
+    expect(routeDisplayOffset("valhalla", 0)).toBe(3);
+  });
+
+  it("moves higher route indexes monotonically farther while staying below 12px", () => {
+    const magnitudes = [0, 1, 2, 3, 10, 100].map((index) =>
+      Math.abs(routeDisplayOffset("valhalla", index)),
+    );
+    for (let index = 1; index < magnitudes.length; index += 1) {
+      expect(magnitudes[index]).toBeGreaterThan(magnitudes[index - 1]);
+    }
+    expect(Math.max(...magnitudes)).toBeLessThan(12);
+  });
+
+  it("is deterministic and clamps negative indexes to the primary offset", () => {
+    expect(routeDisplayOffset("osrm", 4)).toBe(
+      routeDisplayOffset("osrm", 4),
+    );
+    expect(routeDisplayOffset("valhalla", -10)).toBe(3);
   });
 });

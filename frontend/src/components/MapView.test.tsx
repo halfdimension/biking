@@ -28,6 +28,7 @@ interface MockMap {
   getSource: ReturnType<typeof vi.fn>;
   getLayer: ReturnType<typeof vi.fn>;
   setFeatureState: ReturnType<typeof vi.fn>;
+  getFeatureState: ReturnType<typeof vi.fn>;
   fitBounds: ReturnType<typeof vi.fn>;
   easeTo: ReturnType<typeof vi.fn>;
   jumpTo: ReturnType<typeof vi.fn>;
@@ -54,6 +55,7 @@ vi.mock("maplibre-gl", () => {
     sources = new globalThis.Map<string, { setData: (data: unknown) => void }>();
     sourceData = new globalThis.Map<string, unknown>();
     layers = new Set<string>();
+    featureStates = new globalThis.Map<string, Record<string, unknown>>();
     listeners = new globalThis.Map<
       string,
       Array<{ handler: MapEventHandler; once: boolean }>
@@ -122,7 +124,17 @@ vi.mock("maplibre-gl", () => {
     getLayer = vi.fn((id: string) =>
       this.layers.has(id) ? { id } : undefined,
     );
-    setFeatureState = vi.fn();
+    setFeatureState = vi.fn(
+      (
+        target: { source: string; id: string },
+        state: Record<string, unknown>,
+      ) => {
+        this.featureStates.set(`${target.source}:${target.id}`, state);
+      },
+    );
+    getFeatureState = vi.fn((target: { source: string; id: string }) =>
+      this.featureStates.get(`${target.source}:${target.id}`) ?? {},
+    );
     setPaintProperty = vi.fn();
     fitBounds = vi.fn();
     easeTo = vi.fn((options: {
@@ -195,6 +207,26 @@ function route(overrides: Partial<NormalizedRoute> = {}): NormalizedRoute {
   };
 }
 
+function renderedRouteFeature(routeValue: NormalizedRoute) {
+  return {
+    id: routeValue.id,
+    properties: {
+      routeId: routeValue.id,
+      engine: routeValue.engine,
+      index: routeValue.index,
+    },
+  };
+}
+
+function clickMap(map: MockMap, x = 120, y = 90) {
+  act(() => {
+    map.emit("click", {
+      point: { x, y },
+      lngLat: { lng: 77.62, lat: 12.92 },
+    });
+  });
+}
+
 
 function debugResult(): CompareDebug {
   return {
@@ -255,11 +287,12 @@ describe("MapView route rendering (Task 16)", () => {
       routeComparisonCamera: null,
       routeComparisonCameraResultRevision: null,
       comparisonResultRevision: 0,
+      routeSeparationEnabled: true,
       traceInspectorCamera: null,
     });
   });
 
-  it("creates the combined source and three layers when routes arrive", () => {
+  it("creates the combined source and six route layers when routes arrive", () => {
     render(<MapView />);
     const map = lastMap();
 
@@ -276,18 +309,25 @@ describe("MapView route rendering (Task 16)", () => {
       "routes",
       expect.objectContaining({ type: "geojson", promoteId: "routeId" }),
     );
-    // Three layers, in order: hit, base, selected.
+    // Display stack is ordered from hit target through selected redraws.
     const layerIds = map.addLayer.mock.calls.map((c) => (c[0] as { id: string }).id);
-    expect(layerIds).toEqual(["routes-hit", "routes-base", "routes-selected"]);
+    expect(layerIds).toEqual([
+      "routes-hit",
+      "routes-alternates",
+      "routes-primary",
+      "routes-selected-halo",
+      "routes-selected-alternate",
+      "routes-selected-primary",
+    ]);
 
     // feature-state applied for every route.
     expect(map.setFeatureState).toHaveBeenCalledWith(
       { source: "routes", id: "osrm:0" },
-      { visible: true, selected: false, hasSelection: false },
+      { visible: true, selected: false, hasSelection: false, separated: true },
     );
     expect(map.setFeatureState).toHaveBeenCalledWith(
       { source: "routes", id: "valhalla:0" },
-      { visible: true, selected: false, hasSelection: false },
+      { visible: true, selected: false, hasSelection: false, separated: true },
     );
   });
 
@@ -318,7 +358,7 @@ describe("MapView route rendering (Task 16)", () => {
     // feature-state reapplied for both routes, with the new selection.
     expect(map.setFeatureState).toHaveBeenCalledWith(
       { source: "routes", id: "osrm:1" },
-      { visible: true, selected: true, hasSelection: true },
+      { visible: true, selected: true, hasSelection: true, separated: true },
     );
   });
 
@@ -342,9 +382,269 @@ describe("MapView route rendering (Task 16)", () => {
 
     expect(map.setFeatureState).toHaveBeenCalledWith(
       { source: "routes", id: "osrm:0" },
-      { visible: true, selected: true, hasSelection: true },
+      { visible: true, selected: true, hasSelection: true, separated: true },
     );
     expect(setDataSpy).not.toHaveBeenCalled();
+  });
+
+  it("starts with a compact collapsed route-display control showing separation ON", () => {
+    render(<MapView />);
+
+    const header = screen.getByRole("button", {
+      name: "Expand route display settings",
+    });
+    expect(header).toHaveAttribute("aria-expanded", "false");
+    expect(header).toHaveTextContent("Route display · ON");
+    expect(
+      screen.queryByRole("checkbox", {
+        name: "Separate overlapping routes",
+      }),
+    ).toBeNull();
+  });
+
+  it("shows separation OFF in the collapsed row when disabled", () => {
+    useStore.setState({ routeSeparationEnabled: false });
+    render(<MapView />);
+
+    expect(
+      screen.getByRole("button", {
+        name: "Expand route display settings",
+      }),
+    ).toHaveTextContent("Route display · OFF");
+  });
+
+  it("expands the existing route-display content and collapses it again", () => {
+    render(<MapView />);
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Expand route display settings",
+      }),
+    );
+
+    const collapseHeader = screen.getByRole("button", {
+      name: "Collapse route display settings",
+    });
+    expect(collapseHeader).toHaveAttribute("aria-expanded", "true");
+    expect(
+      screen.getByRole("checkbox", {
+        name: "Separate overlapping routes",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Visual only/)).toBeInTheDocument();
+    expect(screen.getByText("Primary")).toBeInTheDocument();
+    expect(screen.getByText("Alternative")).toBeInTheDocument();
+
+    fireEvent.click(collapseHeader);
+    expect(
+      screen.getByRole("button", {
+        name: "Expand route display settings",
+      }),
+    ).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText(/Visual only/)).toBeNull();
+  });
+
+  it("toggles visual separation through feature-state only", () => {
+    const runCompare = vi.fn();
+    useStore.setState({
+      routes: [route()],
+      visibility: { "osrm:0": true },
+      runCompare,
+    });
+    render(<MapView />);
+    const map = lastMap();
+    map.setFeatureState.mockClear();
+    setDataSpy.mockClear();
+    map.fitBounds.mockClear();
+    map.easeTo.mockClear();
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Expand route display settings",
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: "Separate overlapping routes",
+      }),
+    );
+
+    expect(useStore.getState().routeSeparationEnabled).toBe(false);
+    expect(map.setFeatureState).toHaveBeenCalledWith(
+      { source: "routes", id: "osrm:0" },
+      {
+        visible: true,
+        selected: false,
+        hasSelection: false,
+        separated: false,
+      },
+    );
+    expect(setDataSpy).not.toHaveBeenCalled();
+    expect(mapInstances).toHaveLength(1);
+    expect(map.fitBounds).not.toHaveBeenCalled();
+    expect(map.easeTo).not.toHaveBeenCalled();
+    expect(runCompare).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", {
+        name: "Collapse route display settings",
+      }),
+    ).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("expanding and collapsing changes no route, selection, camera, revision, or comparison state", () => {
+    const routes = [route()];
+    const camera = {
+      center: [77.6, 12.9] as [number, number],
+      zoom: 12,
+      bearing: 4,
+      pitch: 10,
+    };
+    const runCompare = vi.fn();
+    useStore.setState({
+      routes,
+      visibility: { "osrm:0": true },
+      selectedRouteId: "osrm:0",
+      routeComparisonCamera: camera,
+      routeComparisonCameraResultRevision: 4,
+      comparisonResultRevision: 4,
+      runCompare,
+    });
+    render(<MapView />);
+    const map = lastMap();
+    setDataSpy.mockClear();
+    map.fitBounds.mockClear();
+    map.easeTo.mockClear();
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Expand route display settings",
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Collapse route display settings",
+      }),
+    );
+
+    const state = useStore.getState();
+    expect(state.routes).toBe(routes);
+    expect(state.selectedRouteId).toBe("osrm:0");
+    expect(state.routeComparisonCamera).toBe(camera);
+    expect(state.comparisonResultRevision).toBe(4);
+    expect(runCompare).not.toHaveBeenCalled();
+    expect(setDataSpy).not.toHaveBeenCalled();
+    expect(mapInstances).toHaveLength(1);
+    expect(map.fitBounds).not.toHaveBeenCalled();
+    expect(map.easeTo).not.toHaveBeenCalled();
+  });
+
+  it("selects the only visible route hit immediately", () => {
+    const osrm = route();
+    useStore.setState({
+      routes: [osrm],
+      visibility: { [osrm.id]: true },
+    });
+    render(<MapView />);
+    const map = lastMap();
+    debugQueryFeatures = [renderedRouteFeature(osrm)];
+
+    clickMap(map);
+
+    expect(useStore.getState().selectedRouteId).toBe(osrm.id);
+    expect(screen.queryByRole("dialog", { name: "Routes here" })).toBeNull();
+  });
+
+  it("shows a deduplicated chooser for multiple visible routes and selects the requested row", () => {
+    const osrm = route();
+    const valhalla = route({
+      id: "valhalla:0",
+      engine: "valhalla",
+      label: "Valhalla Primary",
+    });
+    useStore.setState({
+      routes: [osrm, valhalla],
+      visibility: { [osrm.id]: true, [valhalla.id]: true },
+    });
+    render(<MapView />);
+    const map = lastMap();
+    debugQueryFeatures = [
+      renderedRouteFeature(osrm),
+      renderedRouteFeature(osrm),
+      renderedRouteFeature(valhalla),
+    ];
+
+    clickMap(map);
+
+    expect(useStore.getState().selectedRouteId).toBeNull();
+    expect(
+      screen.getByRole("dialog", { name: "Routes here" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getAllByRole("button", { name: "OSRM Primary" }),
+    ).toHaveLength(1);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Valhalla Primary" }),
+    );
+    expect(useStore.getState().selectedRouteId).toBe(valhalla.id);
+    expect(screen.queryByRole("dialog", { name: "Routes here" })).toBeNull();
+  });
+
+  it("excludes hidden candidates and closes a chooser on an empty click", () => {
+    const osrm = route();
+    const valhalla = route({
+      id: "valhalla:0",
+      engine: "valhalla",
+      label: "Valhalla Primary",
+    });
+    useStore.setState({
+      routes: [osrm, valhalla],
+      visibility: { [osrm.id]: true, [valhalla.id]: true },
+      selectedRouteId: valhalla.id,
+    });
+    render(<MapView />);
+    const map = lastMap();
+    debugQueryFeatures = [
+      renderedRouteFeature(osrm),
+      renderedRouteFeature(valhalla),
+    ];
+    clickMap(map);
+    expect(
+      screen.getByRole("dialog", { name: "Routes here" }),
+    ).toBeInTheDocument();
+
+    act(() => useStore.getState().setVisibility(valhalla.id, false));
+    clickMap(map);
+    expect(useStore.getState().selectedRouteId).toBe(osrm.id);
+    expect(screen.queryByRole("dialog", { name: "Routes here" })).toBeNull();
+
+    debugQueryFeatures = [];
+    clickMap(map);
+    expect(useStore.getState().selectedRouteId).toBe(osrm.id);
+    expect(screen.queryByRole("dialog", { name: "Routes here" })).toBeNull();
+  });
+
+  it("closes an open chooser when a new comparison revision arrives", () => {
+    const osrm = route();
+    const valhalla = route({
+      id: "valhalla:0",
+      engine: "valhalla",
+      label: "Valhalla Primary",
+    });
+    useStore.setState({
+      routes: [osrm, valhalla],
+      visibility: { [osrm.id]: true, [valhalla.id]: true },
+    });
+    render(<MapView />);
+    debugQueryFeatures = [
+      renderedRouteFeature(osrm),
+      renderedRouteFeature(valhalla),
+    ];
+    clickMap(lastMap());
+    expect(
+      screen.getByRole("dialog", { name: "Routes here" }),
+    ).toBeInTheDocument();
+
+    act(() => useStore.setState({ comparisonResultRevision: 1 }));
+    expect(screen.queryByRole("dialog", { name: "Routes here" })).toBeNull();
   });
 
   it("restores pre-existing debug data after route setup unsettles a remounted style", async () => {
@@ -592,8 +892,11 @@ describe("MapView analysis match overlay", () => {
     expect(map.addLayer.mock.calls.map((call) => (call[0] as { id: string }).id))
       .toEqual([
         "routes-hit",
-        "routes-base",
-        "routes-selected",
+        "routes-alternates",
+        "routes-primary",
+        "routes-selected-halo",
+        "routes-selected-alternate",
+        "routes-selected-primary",
         "route-analysis-matches-glow",
         "route-analysis-matches-line",
         "route-debug-highlight",
@@ -761,8 +1064,11 @@ describe("MapView analysis focus overlay", () => {
     expect(map.addLayer.mock.calls.map((call) => (call[0] as { id: string }).id))
       .toEqual([
         "routes-hit",
-        "routes-base",
-        "routes-selected",
+        "routes-alternates",
+        "routes-primary",
+        "routes-selected-halo",
+        "routes-selected-alternate",
+        "routes-selected-primary",
         "route-analysis-matches-glow",
         "route-analysis-matches-line",
         "route-analysis-focus-glow",

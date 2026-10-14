@@ -36,6 +36,7 @@ import {
   dashboardMapOptions,
 } from "../map/initialize";
 import { buildRoutesFeatureCollection } from "../map/routes";
+import { routeColor } from "../map/color";
 import {
   buildDebugSegmentsFeatureCollection,
   buildDebugSegmentLookup,
@@ -59,8 +60,11 @@ import {
   ANALYSIS_FOCUS_GLOW_LAYER_ID,
   ANALYSIS_FOCUS_LAYER_ID,
   hitLayerSpec,
-  baseLayerSpec,
-  selectedLayerSpec,
+  alternatesLayerSpec,
+  primaryLayerSpec,
+  selectedHaloLayerSpec,
+  selectedAlternateLayerSpec,
+  selectedPrimaryLayerSpec,
   debugHighlightLayerSpec,
   debugHitLayerSpec,
   analysisMatchGlowLayerSpec,
@@ -68,7 +72,10 @@ import {
   analysisFocusGlowLayerSpec,
   analysisFocusLayerSpec,
 } from "../map/layers";
-import { resolveSelectedRouteId, type RouteCandidate } from "../map/hitTest";
+import {
+  distinctRouteCandidates,
+  type RouteCandidate,
+} from "../map/hitTest";
 import {
   resolveDebugSegmentIds,
   type RenderedDebugFeature,
@@ -155,6 +162,7 @@ function applyFeatureState(
   routes: NormalizedRoute[],
   visibility: Record<string, boolean>,
   selectedRouteId: string | null,
+  separated: boolean,
 ): void {
   if (!map.setFeatureState) return;
   const hasSelection = selectedRouteId !== null;
@@ -162,7 +170,12 @@ function applyFeatureState(
     const visible = visibility[r.id] ?? true;
     map.setFeatureState(
       { source: ROUTES_SOURCE_ID, id: r.id },
-      { visible, selected: r.id === selectedRouteId, hasSelection },
+      {
+        visible,
+        selected: r.id === selectedRouteId,
+        hasSelection,
+        separated,
+      },
     );
   }
 }
@@ -182,17 +195,17 @@ function applyFeatureState(
  * A click with no candidates leaves the selection unchanged (returns null →
  * no `selectRoute` call), so an empty-basemap click does not clear selection.
  */
-function selectRouteFromClick(
+function routeCandidatesFromClick(
   map: maplibregl.Map,
   point: maplibregl.PointLike,
-): void {
-  if (!map.queryRenderedFeatures) return;
+): RouteCandidate[] {
+  if (!map.queryRenderedFeatures) return [];
   let feats: maplibregl.MapGeoJSONFeature[] = [];
   try {
     feats = map.queryRenderedFeatures(point, { layers: [HIT_LAYER_ID] });
   } catch {
     // No hit layer yet (routes not loaded) — nothing to select.
-    return;
+    return [];
   }
 
   const candidates: RouteCandidate[] = [];
@@ -214,11 +227,7 @@ function selectRouteFromClick(
     });
   }
 
-  const currentSelectedId = useStore.getState().selectedRouteId;
-  const chosen = resolveSelectedRouteId(candidates, currentSelectedId);
-  if (chosen !== null) {
-    useStore.getState().selectRoute(chosen);
-  }
+  return distinctRouteCandidates(candidates);
 }
 
 /** Local state for the right-click context menu overlay (Req 1.4). */
@@ -228,6 +237,12 @@ interface ContextMenuState {
   y: number;
   /** Clicked geographic location. */
   lngLat: { lng: number; lat: number };
+}
+
+interface OverlapChooserState {
+  x: number;
+  y: number;
+  candidates: RouteCandidate[];
 }
 
 export default function MapView() {
@@ -248,6 +263,10 @@ export default function MapView() {
   const routes = useStore((s) => s.routes);
   const visibility = useStore((s) => s.visibility);
   const selectedRouteId = useStore((s) => s.selectedRouteId);
+  const routeSeparationEnabled = useStore((s) => s.routeSeparationEnabled);
+  const setRouteSeparationEnabled = useStore(
+    (s) => s.setRouteSeparationEnabled,
+  );
   // Edge-debug is a separate source/layer path; normal routes remain untouched.
   const edgeDebugEnabled = useStore((s) => s.edgeDebugEnabled);
   const debugResults = useStore((s) => s.debugResults);
@@ -283,6 +302,9 @@ export default function MapView() {
   const bottomCollapsed = useStore((s) => s.bottomCollapsed);
 
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [overlapChooser, setOverlapChooser] =
+    useState<OverlapChooserState | null>(null);
+  const [routeStyleExpanded, setRouteStyleExpanded] = useState(false);
   const [tilted, setTilted] = useState(() => {
     const state = useStore.getState();
     return (
@@ -409,9 +431,22 @@ export default function MapView() {
           setDest(coord);
         }
         useStore.getState().setMapClickTarget(null);
+        setOverlapChooser(null);
         return;
       }
-      selectRouteFromClick(map, e.point);
+      const candidates = routeCandidatesFromClick(map, e.point);
+      if (candidates.length === 1) {
+        useStore.getState().selectRoute(candidates[0].routeId);
+        setOverlapChooser(null);
+      } else if (candidates.length > 1) {
+        setOverlapChooser({
+          x: e.point.x,
+          y: e.point.y,
+          candidates,
+        });
+      } else {
+        setOverlapChooser(null);
+      }
       const state = useStore.getState();
       if (state.edgeDebugEnabled && state.hoveredDebugSegmentIds.length > 0) {
         state.pinHoveredDebugSegments();
@@ -518,21 +553,32 @@ export default function MapView() {
           promoteId: "routeId",
           data: data as unknown as GeoJSON.FeatureCollection,
         });
-        // Bottom → top: hit, base, selected (selected added LAST) (Req 6.4).
-        if (!map.getLayer(hitLayerSpec().id)) {
-          map.addLayer(hitLayerSpec() as maplibregl.LayerSpecification);
-        }
-        if (!map.getLayer(baseLayerSpec().id)) {
-          map.addLayer(baseLayerSpec() as maplibregl.LayerSpecification);
-        }
-        if (!map.getLayer(selectedLayerSpec().id)) {
-          map.addLayer(selectedLayerSpec() as maplibregl.LayerSpecification);
+        // Bottom → top: hit, normal alternates/primaries, selected halo/redraw.
+        const routeLayerSpecs = [
+          hitLayerSpec(),
+          alternatesLayerSpec(),
+          primaryLayerSpec(),
+          selectedHaloLayerSpec(),
+          selectedAlternateLayerSpec(),
+          selectedPrimaryLayerSpec(),
+        ];
+        for (const spec of routeLayerSpecs) {
+          if (!map.getLayer(spec.id)) {
+            map.addLayer(spec as unknown as maplibregl.LayerSpecification);
+          }
         }
       }
 
       // CRITICAL: feature-state does NOT survive a source-data replacement, so
       // reapply it for every current route AFTER setData (Task 16.2).
-      applyFeatureState(map, routes, useStore.getState().visibility, useStore.getState().selectedRouteId);
+      const state = useStore.getState();
+      applyFeatureState(
+        map,
+        routes,
+        state.visibility,
+        state.selectedRouteId,
+        state.routeSeparationEnabled,
+      );
     };
 
     if (map.isStyleLoaded && map.isStyleLoaded()) {
@@ -563,8 +609,19 @@ export default function MapView() {
     if (!map) return;
     if (!map.isStyleLoaded || !map.isStyleLoaded()) return;
     if (!map.getSource(ROUTES_SOURCE_ID)) return;
-    applyFeatureState(map, routes, visibility, selectedRouteId);
-  }, [routes, visibility, selectedRouteId]);
+    applyFeatureState(
+      map,
+      routes,
+      visibility,
+      selectedRouteId,
+      routeSeparationEnabled,
+    );
+  }, [routes, visibility, selectedRouteId, routeSeparationEnabled]);
+
+  // A chooser is meaningful only for the comparison result that produced it.
+  useEffect(() => {
+    setOverlapChooser(null);
+  }, [comparisonResultRevision]);
 
   // --- Additive Route Analysis match source + layers -----------------------
   useEffect(() => {
@@ -1001,6 +1058,11 @@ export default function MapView() {
     setContextMenu(null);
   };
 
+  const chooseOverlappingRoute = (routeId: string) => {
+    useStore.getState().selectRoute(routeId);
+    setOverlapChooser(null);
+  };
+
   return (
     <div className="map-view" data-testid="map-view" aria-label="Map">
       <div ref={containerRef} className="map-view__canvas" data-testid="map-canvas" />
@@ -1013,7 +1075,102 @@ export default function MapView() {
       >
         {tilted ? "2D view" : "Tilt map"}
       </button>
+      <div
+        className={
+          routeStyleExpanded
+            ? "route-style-control route-style-control--expanded"
+            : "route-style-control route-style-control--collapsed"
+        }
+        aria-label="Route display style"
+      >
+        <button
+          type="button"
+          className="route-style-control__header"
+          aria-expanded={routeStyleExpanded}
+          aria-label={
+            routeStyleExpanded
+              ? "Collapse route display settings"
+              : "Expand route display settings"
+          }
+          onClick={() => setRouteStyleExpanded((expanded) => !expanded)}
+        >
+          <span>
+            Route display
+            {!routeStyleExpanded && (
+              <>
+                {" · "}
+                <strong>{routeSeparationEnabled ? "ON" : "OFF"}</strong>
+              </>
+            )}
+          </span>
+          <span aria-hidden="true">{routeStyleExpanded ? "▴" : "▾"}</span>
+        </button>
+        {routeStyleExpanded && (
+          <div className="route-style-control__body">
+            <label className="route-style-control__toggle">
+              <input
+                type="checkbox"
+                checked={routeSeparationEnabled}
+                onChange={(event) =>
+                  setRouteSeparationEnabled(event.target.checked)
+                }
+              />
+              <span>Separate overlapping routes</span>
+            </label>
+            <p className="route-style-control__note">
+              Visual only — route geometry unchanged.
+            </p>
+            <div className="route-style-legend" aria-label="Route style legend">
+              <span className="route-style-legend__item">
+                <span className="route-line-sample route-line-sample--primary" />
+                Primary
+              </span>
+              <span className="route-style-legend__item">
+                <span className="route-line-sample route-line-sample--alternative" />
+                Alternative
+              </span>
+            </div>
+            <p className="route-style-control__note">
+              Colors identify individual routes.
+            </p>
+          </div>
+        )}
+      </div>
       <EdgeDebugInspector />
+      {overlapChooser && (
+        <div
+          className="route-overlap-chooser"
+          role="dialog"
+          aria-label="Routes here"
+          style={{ left: overlapChooser.x, top: overlapChooser.y }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="route-overlap-chooser__title">Routes here</div>
+          {overlapChooser.candidates.map((candidate) => {
+            const route = routes.find((item) => item.id === candidate.routeId);
+            if (!route) return null;
+            return (
+              <button
+                type="button"
+                className="route-overlap-chooser__item"
+                key={candidate.routeId}
+                onClick={() => chooseOverlappingRoute(candidate.routeId)}
+              >
+                <span
+                  className={
+                    route.isPrimary
+                      ? "route-line-sample route-line-sample--primary"
+                      : "route-line-sample route-line-sample--alternative"
+                  }
+                  style={{ color: routeColor(route.engine, route.index) }}
+                  aria-hidden="true"
+                />
+                <span>{route.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
       {contextMenu && (
         <div
           className="map-context-menu"

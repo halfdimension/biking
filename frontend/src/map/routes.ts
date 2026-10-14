@@ -28,6 +28,7 @@ export interface RouteFeatureProperties {
   index: number;
   isPrimary: boolean;
   color: string;
+  displayOffsetPx: number;
 }
 
 export interface RouteFeature {
@@ -52,6 +53,21 @@ export interface RoutesFeatureCollection {
  */
 export function defaultRouteColor(route: NormalizedRoute): string {
   return routeColor(route.engine, route.index);
+}
+
+/**
+ * Deterministic display-only lane offset for a route. MapLibre applies this
+ * value through `line-offset`; the route's GeoJSON coordinates stay untouched.
+ * Opposite signs naturally separate the two engines, while the exponential
+ * curve gives later alternatives more room without reaching 12px.
+ */
+export function routeDisplayOffset(
+  engine: NormalizedRoute["engine"],
+  routeIndex: number,
+): number {
+  const index = Math.max(0, routeIndex);
+  const magnitude = 3 + 9 * (1 - Math.exp(-index / 3));
+  return engine === "osrm" ? -magnitude : magnitude;
 }
 
 /**
@@ -83,6 +99,7 @@ export function buildRoutesFeatureCollection(
         index: r.index,
         isPrimary: r.isPrimary,
         color: colorFor(r),
+        displayOffsetPx: routeDisplayOffset(r.engine, r.index),
       },
     })),
   };

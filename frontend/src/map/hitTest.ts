@@ -30,6 +30,18 @@ export interface RouteCandidate {
   index: number;
 }
 
+/** Remove duplicate rendered/tile features while preserving query order. */
+export function distinctRouteCandidates(
+  candidates: RouteCandidate[],
+): RouteCandidate[] {
+  const seen = new Set<string>();
+  return candidates.filter((candidate) => {
+    if (seen.has(candidate.routeId)) return false;
+    seen.add(candidate.routeId);
+    return true;
+  });
+}
+
 /**
  * Stable comparator: `engine` ascending, then `index` ascending. Used only to
  * break ties among candidates that are equally "topmost", so the resolution is

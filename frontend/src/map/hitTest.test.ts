@@ -5,7 +5,11 @@
  */
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
-import { resolveSelectedRouteId, type RouteCandidate } from "./hitTest";
+import {
+  distinctRouteCandidates,
+  resolveSelectedRouteId,
+  type RouteCandidate,
+} from "./hitTest";
 
 function cand(engine: string, index: number): RouteCandidate {
   return { routeId: `${engine}:${index}`, engine, index };
@@ -100,5 +104,18 @@ describe("resolveSelectedRouteId", () => {
       ),
       { numRuns: 200 },
     );
+  });
+});
+
+describe("distinctRouteCandidates", () => {
+  it("deduplicates rendered/tile copies by routeId while preserving order", () => {
+    expect(
+      distinctRouteCandidates([
+        cand("valhalla", 1),
+        cand("osrm", 0),
+        cand("valhalla", 1),
+        cand("osrm", 0),
+      ]),
+    ).toEqual([cand("valhalla", 1), cand("osrm", 0)]);
   });
 });

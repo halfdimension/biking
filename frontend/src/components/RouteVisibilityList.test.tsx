@@ -11,6 +11,7 @@ import RouteVisibilityList from "./RouteVisibilityList";
 import BulkVisibilityControls from "./BulkVisibilityControls";
 import { useStore } from "../store";
 import type { Engine, NormalizedRoute } from "../types";
+import { routeColor } from "../map/color";
 
 function route(engine: Engine, index: number): NormalizedRoute {
   return {
@@ -133,6 +134,17 @@ describe("RouteVisibilityList", () => {
     expect(otherBtn.closest(".route-row")).not.toHaveClass(
       "route-row--selected",
     );
+  });
+
+  it("uses route-colored solid and dashed line samples for primary and alternative rows", () => {
+    seed();
+    const { container } = render(<RouteVisibilityList engine="osrm" />);
+    const samples = container.querySelectorAll(".route-row__line-sample");
+
+    expect(samples[0]).toHaveClass("route-row__line-sample--primary");
+    expect(samples[0]).toHaveStyle({ color: routeColor("osrm", 0) });
+    expect(samples[1]).toHaveClass("route-row__line-sample--alternative");
+    expect(samples[1]).toHaveStyle({ color: routeColor("osrm", 1) });
   });
 });
 

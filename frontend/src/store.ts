@@ -183,6 +183,8 @@ export interface AppState {
   // View state (Req 5, 6)
   visibility: Record<string, boolean>;
   selectedRouteId: string | null;
+  /** Session-only display preference; never persisted with test cases. */
+  routeSeparationEnabled: boolean;
 
   // Session-only Route Analysis state. It survives component/navigation
   // remounts, but is deliberately not persisted to localStorage.
@@ -330,6 +332,7 @@ export interface AppState {
   sendCurlImport: (curl: string) => Promise<void>;
 
   selectRoute: (routeId: string | null) => void;
+  setRouteSeparationEnabled: (enabled: boolean) => void;
   /** Explicit "Clear selection" control — sets `selectedRouteId` to null. */
   clearSelection: () => void;
   setVisibility: (routeId: string, visible: boolean) => void;
@@ -679,6 +682,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   visibility: {},
   selectedRouteId: null,
+  routeSeparationEnabled: true,
   routeAnalysisRouteId: null,
   routeAnalysisMetricId: "speed",
   routeAnalysisQuery: { field: "speed", operator: "=", value: "" },
@@ -1183,6 +1187,9 @@ export const useStore = create<AppState>((set, get) => ({
   // `selectRoute`). Idempotent: re-selecting the same id keeps it selected;
   // clearing is only via `clearSelection()` (or passing null explicitly).
   selectRoute: (routeId) => set({ selectedRouteId: routeId }),
+
+  setRouteSeparationEnabled: (routeSeparationEnabled) =>
+    set({ routeSeparationEnabled }),
 
   clearSelection: () => set({ selectedRouteId: null }),
 

@@ -105,6 +105,7 @@ function resetStore() {
     curlImportState: { status: "idle", engine: null, result: null, error: null },
     visibility: {},
     selectedRouteId: null,
+    routeSeparationEnabled: true,
     routeAnalysisRouteId: null,
     routeAnalysisMetricId: "speed",
     routeAnalysisQuery: { field: "speed", operator: "=", value: "" },
@@ -244,6 +245,52 @@ describe("store", () => {
       expect(useStore.getState().visibility["osrm:0"]).toBe(false);
       useStore.getState().setVisibility("osrm:0", true);
       expect(useStore.getState().visibility["osrm:0"]).toBe(true);
+    });
+  });
+
+  describe("route visual separation", () => {
+    it("defaults on and toggles without mutating comparison, camera, debug, or analysis state", () => {
+      const routes = [route("osrm", 0), route("valhalla", 0)];
+      useStore.setState({
+        routes,
+        visibility: { "osrm:0": true, "valhalla:0": false },
+        selectedRouteId: "osrm:0",
+        comparisonResultRevision: 7,
+        routeComparisonCamera: {
+          center: [77.6, 12.9],
+          zoom: 12,
+          bearing: 4,
+          pitch: 10,
+        },
+        hoveredDebugSegmentIds: ["debug-hover"],
+        pinnedDebugSegmentIds: ["debug-pin"],
+        debugInspectorPinned: true,
+        routeAnalysisRouteId: "osrm:0",
+        routeAnalysisFocusedSegmentId: "analysis-focus",
+      });
+      expect(useStore.getState().routeSeparationEnabled).toBe(true);
+
+      const before = useStore.getState();
+      useStore.getState().setRouteSeparationEnabled(false);
+      const after = useStore.getState();
+
+      expect(after.routeSeparationEnabled).toBe(false);
+      expect(after.routes).toBe(before.routes);
+      expect(after.visibility).toBe(before.visibility);
+      expect(after.selectedRouteId).toBe(before.selectedRouteId);
+      expect(after.comparisonResultRevision).toBe(
+        before.comparisonResultRevision,
+      );
+      expect(after.routeComparisonCamera).toBe(before.routeComparisonCamera);
+      expect(after.hoveredDebugSegmentIds).toBe(
+        before.hoveredDebugSegmentIds,
+      );
+      expect(after.pinnedDebugSegmentIds).toBe(before.pinnedDebugSegmentIds);
+      expect(after.debugInspectorPinned).toBe(before.debugInspectorPinned);
+      expect(after.routeAnalysisRouteId).toBe(before.routeAnalysisRouteId);
+      expect(after.routeAnalysisFocusedSegmentId).toBe(
+        before.routeAnalysisFocusedSegmentId,
+      );
     });
   });
 
